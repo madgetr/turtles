@@ -99,7 +99,8 @@ function pickTint(others) { // best of a few random tints: the one least like th
   return best;
 }
 const SICK = 35; // health below this = sick
-let turtles = [], sel = null;
+let turtles = [], sel = null, picked = true; // sel = last turtle picked; picked = it's currently selected
+const isPicked = () => picked || turtles.length < 2;
 let T = null, S = MIN_S, st = null;
 function use(t) { T = t; S = t.S; st = t.st; }
 // Personality: each trait is 0..1 (shown as 1-5 dots). Rolled once when a turtle is adopted.
@@ -743,9 +744,11 @@ const stageEl = document.getElementById('stage');
 const starsEl = document.getElementById('stars');
 function drawHud() {
   starsEl.textContent = `⭐ ${stars}`;
-  stageEl.textContent = `${st.health < SICK ? '🤒' : '🐢'} ${T.name} · ` + (T.growth >= 1 ? 'Adult' : `${stageOf(T.growth)} · ${Math.floor(T.growth * 100)}%`) + (st.health < SICK ? ' · sick' : '') + '  ⋯';
-  for (const [k, el] of bars) {
-    const v = k === 'clean' ? cleanness() : st[k];
+  const live = turtles.filter(t => t.releasing === undefined);
+  if (isPicked()) stageEl.textContent = `${st.health < SICK ? '🤒' : '🐢'} ${T.name} · ` + (T.growth >= 1 ? 'Adult' : `${stageOf(T.growth)} · ${Math.floor(T.growth * 100)}%`) + (st.health < SICK ? ' · sick' : '') + '  ⋯';
+  else stageEl.textContent = `🐢 ${live.length} turtles` + (live.some(t => t.st.health < SICK) ? ' · 🤒 someone is sick' : '');
+  for (const [k, el] of bars) { // nobody picked: the bars show the yard average
+    const v = k === 'clean' ? cleanness() : isPicked() ? st[k] : live.reduce((a, t) => a + t.st[k], 0) / Math.max(1, live.length);
     el.style.width = v + '%';
     el.style.background = v < 25 ? '#ef6a5a' : v < 50 ? '#f2c14e' : '#8fd16a';
   }
@@ -796,7 +799,7 @@ function hex(c, x, y, r, rot = 0) {
 
 function drawTurtle(time) {
   const c = ctx, g = G(), L = look(g);
-  if (turtles.length > 1 && T === sel) { // selection ring
+  if (turtles.length > 1 && T === sel && picked) { // selection ring
     c.strokeStyle = '#ffffffb0'; c.lineWidth = 2.5; c.setLineDash([6, 5]); c.lineDashOffset = -time * 12;
     c.beginPath(); c.ellipse(T.x, T.y, S * 1.55, S * 1.45, T.a, 0, 7); c.stroke(); c.setLineDash([]);
   }
@@ -950,7 +953,7 @@ function drawTurtle(time) {
   c.restore();
 
   // name tag when there's more than one turtle
-  if (turtles.length > 1 && T === sel) {
+  if (turtles.length > 1 && T === sel && picked) {
     const ty = T.y + S * 1.45 + 10, lab = textSprite(T.name, 'bold 12px system-ui', '#2c4020'), tw = lab.w + 12;
     c.fillStyle = '#fffe'; c.beginPath(); c.roundRect(T.x - tw / 2, ty - 9, tw, 18, 9); c.fill();
     drawText(c, lab, T.x, ty + 0.5);
@@ -1174,32 +1177,28 @@ function lights() {
   for (const f of flies) L.push({ x: f.x, y: f.y, r: 18, k: 0.6 * (0.5 + 0.5 * Math.sin(f.ph * 3)) });
   return L;
 }
-// Drawn straight onto the main canvas (an offscreen overlay canvas kept getting dropped by phone GPUs):
-// one dark fill with holes cut around each light, then each hole shaded with a soft gradient.
+// Darkness with lights cut out of it. Rendered small on a *software* canvas (plain pixels): GPU or
+// recorded offscreen canvases got dropped by phone GPUs. destination-out makes overlapping lights add up.
+const NIGHT_RES = 0.25, nightCv = document.createElement('canvas'), nctx = nightCv.getContext('2d', { willReadFrequently: true });
 function drawNight(dk) {
   if (dk < 0.02) return;
-  const ls = lights(), a = 0.62 * dk, col = '10,16,44';
+  const ls = lights(), nw = Math.max(1, Math.ceil(W * NIGHT_RES)), nh = Math.max(1, Math.ceil(H * NIGHT_RES));
+  if (nightCv.width !== nw || nightCv.height !== nh) { nightCv.width = nw; nightCv.height = nh; }
   const toS = (l, k) => [((l.x - cam.x) * cam.z + vcx()) * k, ((l.y - cam.y) * cam.z + vcy()) * k, l.r * cam.z * k];
-  const holes = [];
+  const n = nctx;
+  n.globalCompositeOperation = 'copy'; n.fillStyle = `rgba(10,16,44,${0.62 * dk})`; n.fillRect(0, 0, nw, nh);
+  n.globalCompositeOperation = 'destination-out';
   for (const l of ls) {
     if (!l.warm) continue; // fireflies are drawn as their own glow
-    const [sx, sy, r] = toS(l, DPR);
-    if (r > 2 && sx + r > 0 && sy + r > 0 && sx - r < cv.width && sy - r < cv.height) holes.push({ sx, sy, r, k: l.k });
+    const [sx, sy, r] = toS(l, NIGHT_RES);
+    if (r < 1 || sx + r < 0 || sy + r < 0 || sx - r > nw || sy - r > nh) continue;
+    const g = n.createRadialGradient(sx, sy, 0, sx, sy, r);
+    g.addColorStop(0, `rgba(0,0,0,${l.k})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+    n.fillStyle = g; n.fillRect(sx - r, sy - r, r * 2, r * 2);
   }
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const notIn = h => { ctx.beginPath(); ctx.rect(0, 0, cv.width, cv.height); ctx.arc(h.sx, h.sy, h.r, 0, Math.PI * 2); ctx.clip('evenodd'); };
-  ctx.save(); // clips stack, so this leaves everything outside every light
-  for (const h of holes) notIn(h);
-  ctx.fillStyle = `rgba(${col},${a})`; ctx.fillRect(0, 0, cv.width, cv.height);
-  ctx.restore();
-  holes.forEach((h, i) => { // each light shades its own circle, minus the parts earlier lights already did
-    ctx.save();
-    for (let j = 0; j < i; j++) notIn(holes[j]);
-    const g = ctx.createRadialGradient(h.sx, h.sy, 0, h.sx, h.sy, h.r);
-    g.addColorStop(0, `rgba(${col},${a * (1 - h.k)})`); g.addColorStop(1, `rgba(${col},${a})`);
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(h.sx, h.sy, h.r, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-  });
+  n.globalCompositeOperation = 'source-over';
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(nightCv, 0, 0, cv.width, cv.height);
   ctx.globalCompositeOperation = 'lighter';
   for (const l of ls) if (l.warm) {
     const [sx, sy, r] = toS(l, DPR); if (sx + r < 0 || sy + r < 0 || sx - r > cv.width || sy - r > cv.height) continue;
@@ -1506,7 +1505,7 @@ document.querySelectorAll('#tools button').forEach(b => b.addEventListener('clic
   mode = b.dataset.mode;
   placing = null; endArrange();
   document.querySelectorAll('#tools button').forEach(x => x.classList.toggle('on', x === b));
-  say({ walk: turtles.length > 1 ? `Tap to call ${sel.name} · tap a turtle to pet & pick it` : 'Tap to call your turtle · tap him to pet', food: 'Tap to drop food', clean: 'Tap the messes to scoop them', play: 'Tap to toss the ball · flick it' }[mode]);
+  say({ walk: turtles.length > 1 ? (isPicked() ? `Tap to call ${sel.name} · tap a turtle to pet & pick it` : 'Tap a turtle to pick it') : 'Tap to call your turtle · tap him to pet', food: 'Tap to drop food', clean: 'Tap the messes to scoop them', play: 'Tap to toss the ball · flick it' }[mode]);
   if (mode === 'play' && !ball) ball = makeBall(cam.x, cam.y);
   renderToybar();
 }));
@@ -1645,10 +1644,12 @@ function tap(p) {
     placing = null; save();
     return;
   }
-  if (arranging || p.x < 0 || p.y < 0 || p.x > YW || p.y > YH) return;
+  if (arranging) return;
+  if (p.x < 0 || p.y < 0 || p.x > YW || p.y > YH) { if (isPicked() && turtles.length > 1) deselect(); return; }
   const hitT = turtles.filter(t => t.releasing === undefined && dist(p, t) < t.S * 1.2 + 8 / cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0];
   if (hitT) return mode === 'clean' && hitT.mud > 0 ? wash(hitT) : pet(hitT);
-  if (mode === 'walk') { sel.userTarget = { x: p.x, y: p.y }; sel.eat = null; sel.drinkT = 0; sel.rest = null; sel.outing = null; }
+  if (mode === 'walk' && !isPicked()) say('Tap a turtle to pick it, then tap to call it');
+  else if (mode === 'walk') { sel.userTarget = { x: p.x, y: p.y }; sel.eat = null; sel.drinkT = 0; sel.rest = null; sel.outing = null; }
   else if (mode === 'food') {
     if (foods.filter(f => f.slot === undefined).length >= 6) return say('That\'s plenty of food!');
     const type = foodToggle++ % 3 === 2 ? 'berry' : 'lettuce';
@@ -1673,8 +1674,12 @@ function tap(p) {
 }
 
 function select(t) {
-  if (t === sel) return;
-  sel = t; say(`${t.name} picked 🐢`);
+  if (t === sel && picked) return;
+  sel = t; picked = true; say(`${t.name} picked 🐢`);
+}
+function deselect() {
+  picked = false; sel.userTarget = null;
+  say('No turtle picked · tap one to pick it');
 }
 function pet(t) {
   select(t);
@@ -1714,6 +1719,7 @@ document.getElementById('away-ok').onclick = () => { document.getElementById('aw
 // ---------- tap the name label: rename or release ----------
 const menu = document.getElementById('menu');
 stageEl.addEventListener('click', () => {
+  if (!isPicked()) return say('Tap a turtle to pick it');
   menu.querySelector('.title').textContent = `🐢 ${sel.name}`;
   menu.querySelector('.persona').textContent = personality(sel.traits);
   menu.querySelector('.traits').innerHTML = TRAITS.map(d => {
@@ -1721,12 +1727,14 @@ stageEl.addEventListener('click', () => {
     return `<div>${d.icon} ${d.label}</div><div class="dots">${'●'.repeat(n)}<span>${'●'.repeat(5 - n)}</span></div>`;
   }).join('');
   document.getElementById('m-release').disabled = turtles.length < 2;
+  document.getElementById('m-deselect').hidden = turtles.length < 2;
   const vb = document.getElementById('m-vet');
   vb.hidden = !up.vet; vb.textContent = `💊 Use vet kit (${up.vet} left)`;
   menu.hidden = false;
 });
 menu.addEventListener('click', e => { if (e.target === menu) menu.hidden = true; });
 document.getElementById('m-close').onclick = () => { menu.hidden = true; };
+document.getElementById('m-deselect').onclick = () => { menu.hidden = true; deselect(); };
 document.getElementById('m-rename').onclick = () => {
   menu.hidden = true;
   const name = (prompt(`Rename ${sel.name}:`, sel.name) ?? '').trim().slice(0, 14);
@@ -1876,7 +1884,7 @@ function frame(now) {
     }
   }
   poops.forEach(p => p.born += dt);
-  marker = sel.userTarget;
+  marker = isPicked() ? sel.userTarget : null;
   const nowMs = Date.now(), dk = darkness();
   gardenTick(nowMs);
   if (objOf('garden')) for (const f of foods) if (f.slot !== undefined) { const sp = slotPos(f.slot); f.x = sp.x; f.y = sp.y; }
