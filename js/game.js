@@ -66,6 +66,12 @@ const STRUCTS = {
   fog: { name: 'Fog machine', icon: '🌫️', cost: 350, desc: 'Puffs cool mist. Turtles love a misty stroll, mud stays soft, and it glows at night.' },
   cave: { name: 'Stone cave', icon: '🕳️', cost: 400, desc: 'A cool stone hideout. Shy turtles adore it.' },
 };
+// Wildlife you can attract: a bit comes free, the rest from these. Each level costs more.
+const WILD = {
+  birdfeeder: { name: 'Bird feeder', icon: '🐦', costs: [80, 200, 450], desc: ['Birds come to visit and sometimes drop a feather find.', 'More birds, more feathers.', 'A whole flock, and lots of feathers.'] },
+  lily: { name: 'Lily pads', icon: '🐸', costs: [70, 180, 400], desc: ['Lily pads on the pond, and 2 more frogs.', 'More pads, 2 more frogs.', 'A frog chorus at night!'], needs: 'pond' },
+  bughotel: { name: 'Bug hotel', icon: '🐞', costs: [120, 350], desc: ['Ladybugs and dragonflies move in. Treasures turn up critter finds more often.', 'Even more bugs, and more critter finds.'] },
+};
 const BED = { rx: 82, ry: 56 }, FOG_R = 170, CAVE = { r: 125 }, TREE_R = 150;
 const AUTO = {
   lamp: { name: 'Heat lamp', icon: '🔆', cost: 80, desc: 'Turtles nearby stay full longer and grow faster. Glows at night.' },
@@ -84,6 +90,7 @@ const DECOS = {
   wishtree: { name: 'Wishing tree', icon: '🎋', emoji: true, reward: true, tall: true },
   frogstatue: { name: 'Frog statue', icon: '🐸', emoji: true, reward: true, tall: true },
   flag: { name: 'Pirate flag', icon: '🏴‍☠️', emoji: true, reward: true, tall: true },
+  bbush: { name: 'Butterfly bush', icon: '🦋', cost: 60, step: 40, tall: true, wild: true, desc: 'Purple flowers that bring 3 more butterflies each.' },
   tree: { name: 'Shade tree', icon: '🌳', cost: 150, step: 75, canopy: true, desc: 'Turtles nap in its shade on sunny days. Every tree grows a little differently.' },
 };
 // Each tree's size and look come from its seed: 85-130% of TREE_R, its own greens, some in blossom or fruit.
@@ -118,7 +125,7 @@ let crabs = [];   // clean-up crabs (not saved: they just scuttle back in)
 let flies = [];   // fireflies at night
 let arranging = false, hourOverride = null;
 const POND = { rx: 120, ry: 78 }, LOG = { len: 150, r: 40 }, HUT = { r: 54 }, FEEDER_R = 26;
-let up = { yard: 0, bowl: 0, feeder: 0, toys: ['ball'], toy: 'ball', crab: 0, vet: 0, garden: 0, size: {} };
+let up = { yard: 0, bowl: 0, feeder: 0, toys: ['ball'], toy: 'ball', crab: 0, vet: 0, garden: 0, size: {}, birds: 0, lily: 0, bugs: 0 };
 let objs = []; // placed things: { kind: 'feeder' | 'rock' | 'log' | 'hut' | 'pond', x, y }
 let stars = 0, lastDaily = '', base = null, feederT = 0, waterStarCool = 0;
 let YW = 400, YH = 600;
@@ -1584,22 +1591,55 @@ function drawTree(o, time) {
   c.restore();
 }
 
+// ---------- wildlife attractors ----------
+function drawBirdFeeder(o) {
+  const c = ctx;
+  c.fillStyle = '#0003'; c.beginPath(); c.ellipse(o.x + 3, o.y + 3, 14, 6, 0, 0, 7); c.fill();
+  c.strokeStyle = '#6b4a2a'; c.lineWidth = 4; c.beginPath(); c.moveTo(o.x, o.y); c.lineTo(o.x, o.y - 34); c.stroke(); // pole
+  c.fillStyle = '#8a5f34'; c.beginPath(); c.roundRect(o.x - 18, o.y - 42, 36, 10, 3); c.fill(); // tray
+  c.fillStyle = '#d9b46a'; for (let i = 0; i < 8; i++) { c.beginPath(); c.arc(o.x - 13 + i * 3.7, o.y - 41, 1.6, 0, 7); c.fill(); } // seeds
+  c.fillStyle = '#a3462f'; c.beginPath(); c.moveTo(o.x - 22, o.y - 46); c.lineTo(o.x, o.y - 60); c.lineTo(o.x + 22, o.y - 46); c.closePath(); c.fill(); // roof
+}
+function drawBugHotel(o) {
+  const c = ctx;
+  c.fillStyle = '#0003'; c.beginPath(); c.ellipse(o.x + 3, o.y + 4, 20, 7, 0, 0, 7); c.fill();
+  c.fillStyle = '#8a5f34'; c.beginPath(); c.roundRect(o.x - 18, o.y - 40, 36, 42, 3); c.fill();
+  c.fillStyle = '#6b4526'; c.beginPath(); c.moveTo(o.x - 22, o.y - 38); c.lineTo(o.x, o.y - 54); c.lineTo(o.x + 22, o.y - 38); c.closePath(); c.fill();
+  const rnd = seeded(o.seed || 0.3);
+  for (let r2 = 0; r2 < 3; r2++) for (let k = 0; k < 3; k++) { // little rooms: holes, sticks and pinecones
+    const x = o.x - 11 + k * 11, y = o.y - 31 + r2 * 12;
+    c.fillStyle = ['#3a2512', '#c9a46a', '#7a5a36'][Math.floor(rnd() * 3)]; c.beginPath(); c.arc(x, y, 4.2, 0, 7); c.fill();
+    c.fillStyle = '#1a1008'; c.beginPath(); c.arc(x, y, 1.6, 0, 7); c.fill();
+  }
+}
+function drawLilies(o, time) {
+  const c = ctx, rnd = seeded(0.77), n = up.lily * 4;
+  for (let i = 0; i < n; i++) {
+    const a = rnd() * 6.28, d = 0.25 + rnd() * 0.6, x = o.x + Math.cos(a) * POND.rx * d, y = o.y + Math.sin(a) * POND.ry * d, pr = 9 + rnd() * 8, bob = Math.sin(time + i) * 1.2;
+    c.fillStyle = '#4f8f3a'; c.beginPath(); c.arc(x, y + bob, pr, 0.3, Math.PI * 2 - 0.1); c.lineTo(x, y + bob); c.fill();
+    if (rnd() < 0.35) { c.fillStyle = '#f7c6d9'; c.beginPath(); c.arc(x + pr * 0.2, y + bob - 1, pr * 0.32, 0, 7); c.fill(); c.fillStyle = '#f5d76a'; c.beginPath(); c.arc(x + pr * 0.2, y + bob - 1, pr * 0.1, 0, 7); c.fill(); }
+  }
+}
+
 // ---------- wildlife: just for looks (not saved) ----------
 // butterflies by day, dragonflies and frogs once there's a pond, birds that hop about and flee from turtles
-let bugs = [], frogs = [], birds = [];
+let bugs = [], frogs = [], birds = [], ladybugs = [];
 function updateLife(dt, dk) {
   const day = dk < 0.4, pond = objOf('pond');
-  const flowers = objs.filter(o => o.kind === 'deco' && (o.type === 'flowers' || o.type === 'bush'));
-  const wantB = day ? 3 + up.yard * 2 + flowers.length : 0, wantD = day && pond ? 2 + (up.size.pond || 0) : 0;
+  const bushes = objs.filter(o => o.kind === 'deco' && o.type === 'bbush'), hotel = objOf('bughotel');
+  const flowers = [...bushes, ...bushes, ...objs.filter(o => o.kind === 'deco' && (o.type === 'flowers' || o.type === 'bush'))]; // butterflies favour their bushes
+  const hover = pond || hotel; // dragonflies patrol the pond, or the bug hotel if there's no pond
+  const wantB = day ? 2 + bushes.length * 3 : 0, wantD = day && hover ? (pond ? 1 : 0) + up.bugs * 2 : 0;
   const nB = bugs.filter(b => !b.drag).length, nD = bugs.length - nB;
   if (nB < wantB) bugs.push({ x: rand(40, YW - 40), y: rand(40, YH - 40), vx: 0, vy: 0, t: rand(0, 9), hue: [330, 45, 200, 280, 20][Math.floor(rand(0, 5))], tgt: null });
-  if (nD < wantD) bugs.push({ drag: true, x: pond.x, y: pond.y, vx: 0, vy: 0, t: rand(0, 9), hue: rand(150, 200), tgt: null, hold: 0 });
+  if (nD < wantD) bugs.push({ drag: true, x: hover.x, y: hover.y, vx: 0, vy: 0, t: rand(0, 9), hue: rand(150, 200), tgt: null, hold: 0 });
   if (nB > wantB || nD > wantD) bugs = bugs.filter(b => (b.drag ? nD <= wantD : nB <= wantB)); // night: they all go home
   for (const b of bugs) {
     b.t += dt;
     if (b.drag) { // dart, hover, dart
-      if (!pond) { b.gone = true; continue; }
-      if ((b.hold -= dt) <= 0 || !b.tgt) { b.tgt = { x: pond.x + rand(-1, 1) * POND.rx * 1.1, y: pond.y + rand(-1, 1) * POND.ry * 1.1 }; b.hold = rand(0.6, 2); }
+      if (!hover) { b.gone = true; continue; }
+      const hr = pond ? POND.rx * 1.1 : 140, hry = pond ? POND.ry * 1.1 : 100;
+      if ((b.hold -= dt) <= 0 || !b.tgt) { b.tgt = { x: hover.x + rand(-1, 1) * hr, y: hover.y + rand(-1, 1) * hry }; b.hold = rand(0.6, 2); }
       b.x = lerp(b.x, b.tgt.x, Math.min(1, dt * 5)); b.y = lerp(b.y, b.tgt.y, Math.min(1, dt * 5));
     } else { // flutter toward a flower or a random spot
       if (!b.tgt || dist(b, b.tgt) < 12 || Math.random() < dt * 0.1) {
@@ -1612,8 +1652,17 @@ function updateLife(dt, dk) {
     }
   }
   bugs = bugs.filter(b => !b.gone);
+  // ladybugs crawl around the bug hotel
+  const wantL = hotel ? up.bugs * 3 : 0;
+  while (ladybugs.length < wantL) ladybugs.push({ x: hotel.x + rand(-40, 40), y: hotel.y + rand(-20, 40), a: rand(0, 7), t: rand(0, 5) });
+  if (ladybugs.length > wantL) ladybugs.length = wantL;
+  for (const l of ladybugs) {
+    l.t += dt; l.a += rand(-2, 2) * dt;
+    if (dist(l, hotel) > 90) l.a = Math.atan2(hotel.y + 20 - l.y, hotel.x - l.x);
+    l.x += Math.cos(l.a) * 9 * dt; l.y += Math.sin(l.a) * 9 * dt;
+  }
   // frogs sit at the pond edge, hop away from turtles, croak at night
-  const wantF = pond ? 2 + (up.size.pond || 0) : 0;
+  const wantF = pond ? 1 + up.lily * 2 : 0;
   while (frogs.length < wantF) { const a = rand(0, 7); frogs.push({ a, x: pond.x + Math.cos(a) * POND.rx * 1.05, y: pond.y + Math.sin(a) * POND.ry * 1.05, hop: 0, from: null, to: null, croak: rand(2, 8), face: a }); }
   if (frogs.length > wantF) frogs.length = wantF;
   for (const f of frogs) {
@@ -1632,9 +1681,10 @@ function updateLife(dt, dk) {
     if (dk > 0.5 && (f.croak -= dt) <= 0) { f.croak = rand(4, 12); emit(f.x, f.y - 8, 'note'); if (snd.soundMode() === 2) sfx('croak', f); }
   }
   // birds land, peck, and fly off when a turtle gets close
-  const wantBird = day ? 1 + Math.min(4, up.yard) : 0;
-  if (birds.length < wantBird && Math.random() < dt * 0.15) {
-    const side = Math.random() < 0.5 ? -60 : YW + 60, to = { x: rand(60, YW - 60), y: rand(60, YH - 60) };
+  const bf = objOf('birdfeeder'), wantBird = day ? 1 + (bf ? up.birds * 2 : 0) : 0;
+  if (birds.length < wantBird && Math.random() < dt * (bf ? 0.15 : 0.03)) { // without a feeder a bird only drops by now and then
+    const side = Math.random() < 0.5 ? -60 : YW + 60, nearFeeder = bf && Math.random() < 0.75;
+    const to = nearFeeder ? { x: clamp(bf.x + rand(-60, 60), 30, YW - 30), y: clamp(bf.y + rand(-10, 50), 30, YH - 30) } : { x: rand(60, YW - 60), y: rand(60, YH - 60) };
     birds.push({ x: side, y: to.y - 120, to, fly: true, peck: 0, t: 0, face: side < 0 ? 0 : Math.PI, hue: [25, 10, 210][Math.floor(rand(0, 3))] });
   }
   for (const b of birds) {
@@ -1649,7 +1699,7 @@ function updateLife(dt, dk) {
     if (Math.random() < dt * 0.8) b.peck = 0.3;
     if (Math.random() < dt * 0.4) { const a = rand(0, 7); b.to = { x: clamp(b.x + Math.cos(a) * 18, 30, YW - 30), y: clamp(b.y + Math.sin(a) * 18, 30, YH - 30) }; b.face = a; b.x = b.to.x; b.y = b.to.y; }
     if (!day || turtles.some(t => dist(t, b) < t.S + 50) || b.t > 40) { // away!
-      if (day && Math.random() < 0.06 && loot.treasures.length <= MAX_DROPS) dropTreasure({ x: b.x, y: b.y }, 'critters');
+      if (day && Math.random() < 0.04 + 0.06 * up.birds && loot.treasures.length <= MAX_DROPS) dropTreasure({ x: b.x, y: b.y }, 'critters'); // a feather or a bug
       b.fly = true; b.leaving = true; b.to = { x: b.x + (b.x < YW / 2 ? -1 : 1) * 500, y: b.y - 300 };
     }
   }
@@ -1657,6 +1707,13 @@ function updateLife(dt, dk) {
 }
 function drawGroundLife(v) {
   const c = ctx;
+  for (const l of ladybugs) {
+    if (!inView(l, 10, v)) continue;
+    c.save(); c.translate(l.x, l.y); c.rotate(l.a);
+    c.fillStyle = '#d8342a'; c.beginPath(); c.ellipse(0, 0, 3.4, 2.8, 0, 0, 7); c.fill();
+    c.fillStyle = '#1a1a1a'; c.beginPath(); c.arc(3, 0, 1.4, 0, 7); c.arc(-0.5, -1.1, 0.7, 0, 7); c.arc(-0.5, 1.1, 0.7, 0, 7); c.fill();
+    c.restore();
+  }
   for (const f of frogs) {
     if (!inView(f, 20, v)) continue;
     c.save(); c.translate(f.x, f.y); c.rotate(f.face + Math.PI / 2);
@@ -1776,7 +1833,7 @@ function dropTreasure(at, setKey) { // somewhere open in the yard (or right wher
 function lootTick(now) {
   if (!loot.last) loot.last = now - DROP_EVERY; // first one right away
   let n = 0;
-  while (now - loot.last >= DROP_EVERY) { loot.last += DROP_EVERY; if (loot.treasures.length < MAX_DROPS && dropTreasure()) n++; }
+  while (now - loot.last >= DROP_EVERY) { loot.last += DROP_EVERY; if (loot.treasures.length < MAX_DROPS && dropTreasure(null, Math.random() < 0.2 * up.bugs ? 'critters' : null)) n++; }
   if (n) { say(`✨ ${n > 1 ? n + ' treasures' : 'A treasure'} turned up in the yard! Find ${n > 1 ? 'them' : 'it'} and tap`, 3500); save(); }
 }
 function addFind(id) { // returns true if it's new
@@ -1942,6 +1999,16 @@ for (const el of [bookEl, jobsEl]) {
 function seeded(seed) { let s = Math.floor(seed * 2147483646) + 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
 function drawDeco(o, time, dk) {
   const c = ctx, r = seeded(o.seed || 0.5), { x, y } = o;
+  if (o.type === 'bbush') { // butterfly bush: a leafy mound with purple flower spikes
+    c.fillStyle = '#0003'; c.beginPath(); c.ellipse(x + 3, y + 4, 26, 10, 0, 0, 7); c.fill();
+    for (let i = 0; i < 7; i++) { c.fillStyle = ['#3f7a2e', '#4d8a36', '#5c9a40'][i % 3]; c.beginPath(); c.arc(x + (r() - 0.5) * 34, y - 6 - r() * 12, 10 + r() * 6, 0, 7); c.fill(); }
+    for (let i = 0; i < 6; i++) {
+      const fx = x + (r() - 0.5) * 36, fy = y - 14 - r() * 14;
+      c.fillStyle = r() < 0.5 ? '#9b5fd0' : '#b77df0';
+      for (let k = 0; k < 4; k++) { c.beginPath(); c.ellipse(fx, fy - k * 3.2, 3.4 - k * 0.6, 2.6, 0, 0, 7); c.fill(); }
+    }
+    return;
+  }
   if (DECOS[o.type]?.emoji) { // collection rewards: a big emoji standing in the yard
     c.fillStyle = '#0003'; c.beginPath(); c.ellipse(x + 3, y + 4, 22, 9, 0, 0, 7); c.fill();
     drawEmoji(c, DECOS[o.type].icon, x, y - 22, 52); return;
@@ -2413,8 +2480,8 @@ cv.addEventListener('wheel', e => { // desktop zoom
 }, { passive: false });
 
 const nameOf = o => o === bowl ? BOWLS[up.bowl].name : o.kind === 'feeder' ? FEEDERS[up.feeder].name
-  : o.kind === 'deco' ? DECOS[o.type].name : (AUTO[o.kind] || STRUCTS[o.kind] || ROCKS[o.kind]).name;
-const HIT = { pond: 100, log: 75, hut: HUT.r, garden: 55, mud: 60, slide: 75, mirror: 32, lamp: 30, feeder: 30, deco: 24, mossbed: 70, fog: 30, cave: 120 };
+  : o.kind === 'deco' ? DECOS[o.type].name : (AUTO[o.kind] || STRUCTS[o.kind] || ROCKS[o.kind] || WILD[o.kind]).name;
+const HIT = { pond: 100, log: 75, hut: HUT.r, garden: 55, mud: 60, slide: 75, mirror: 32, lamp: 30, feeder: 30, deco: 24, mossbed: 70, fog: 30, cave: 120, birdfeeder: 28, bughotel: 28 };
 const hitR = o => (o === bowl ? bowl.r : ROCKS[o.kind] ? rockDims(o).rx * 0.85 : o.kind === 'garden' ? gardenCols() * SLOT / 2 + 10 : (HIT[o.kind] || 30) * sizeK(o.kind));
 const movables = () => [bowl, ...objs];
 const doneBtn = document.getElementById('arrange-done');
@@ -2664,9 +2731,19 @@ function buildShop() {
     if (objOf(k)) rows.push(sizeRow(k, sd));
     else rows.push({ icon: sd.icon, name: sd.name, desc: sd.desc, cost: sd.cost, locked: sd.needYard && up.yard < sd.needYard ? 'Needs a Medium yard' : null, buy: () => startPlacing(newObj(k)) });
   }
+  rows.push({ sec: '🦋 Wildlife' });
+  { const dd = DECOS.bbush, n = objs.filter(o => o.kind === 'deco' && o.type === 'bbush').length;
+    rows.push({ icon: dd.icon, name: dd.name, desc: dd.desc + (n ? ` You have ${n}.` : ''), cost: dd.cost + dd.step * n, buy: () => { const o = newObj('deco'); o.type = 'bbush'; o.seed = Math.random(); startPlacing(o); } }); }
+  for (const [k, w] of Object.entries(WILD)) {
+    const lv = up[k === 'birdfeeder' ? 'birds' : k === 'lily' ? 'lily' : 'bugs'], key = k === 'birdfeeder' ? 'birds' : k === 'lily' ? 'lily' : 'bugs';
+    if (lv >= w.costs.length) { rows.push({ icon: w.icon, name: w.name, desc: 'All the critters it can attract.', done: 'Maxed' }); continue; }
+    const needPond = w.needs === 'pond' && !objOf('pond');
+    rows.push({ icon: w.icon, name: lv ? `${w.name} (level ${lv + 1})` : w.name, desc: w.desc[lv], cost: w.costs[lv], locked: needPond ? 'Needs a pond' : null,
+      buy: () => { up[key]++; if (k !== 'lily' && !objOf(k)) startPlacing(newObj(k)); say(`${w.icon} ${w.name}${up[key] > 1 ? ` level ${up[key]}` : ''}!`); } });
+  }
   rows.push({ sec: '🌷 Decorations' });
   for (const [k, dd] of Object.entries(DECOS)) {
-    if (dd.reward) continue; // earned from the collection book, not sold
+    if (dd.reward || dd.wild) continue; // earned from the collection book / sold under Wildlife
     const n = objs.filter(o => o.kind === 'deco' && o.type === k).length;
     rows.push({ icon: dd.icon, name: dd.name, desc: (dd.desc ? dd.desc + ' ' : '') + (dd.light ? 'Glows at night. ' : '') + (n ? `You have ${n}.` : 'Buy as many as you like.'), cost: dd.cost + (dd.step || 0) * n, buy: () => { const o = newObj('deco'); o.type = k; o.seed = Math.random(); startPlacing(o); } });
   }
@@ -2795,7 +2872,7 @@ function frame(now) {
   drawYard(v);
   const pond = objOf('pond'), mud = objOf('mud'), slide = objOf('slide'), lamp = objOf('lamp'), garden = objOf('garden'), mirror = objOf('mirror');
   if (lamp && inView(lamp, LAMP_R, v)) drawLampGlow(lamp, dk);
-  if (pond && inView(pond, POND.rx + 20, v)) drawPond(pond, time);
+  if (pond && inView(pond, POND.rx + 20, v)) { drawPond(pond, time); if (up.lily) drawLilies(pond, time); }
   if (mud && inView(mud, MUD.rx + 10, v)) drawMud(mud, time);
   for (const rk of rocksPlaced()) if (inView(rk, rockDims(rk).rx + 30, v)) drawRock(rk, time, dk);
   const bed = objOf('mossbed'), fog = objOf('fog'), cave = objOf('cave'), trs = trees();
@@ -2817,12 +2894,14 @@ function frame(now) {
   drawMarker(time);
   // turtles, crabs, toy, bowl, feeder, mirror and tall decorations back-to-front so overlaps look right
   const order = [...turtles.filter(t => !t.off), ...(feeder ? [feeder] : []), ...(ball ? [ball] : []), ...(mirror ? [mirror] : []),
-    ...crabs.filter(c => inView(c, 20, v)), ...objs.filter(o => o.kind === 'deco' && DECOS[o.type].tall && inView(o, 50, v))].sort((a, b) => a.y - b.y);
+    ...crabs.filter(c => inView(c, 20, v)), ...objs.filter(o => (WILD[o.kind] || (o.kind === 'deco' && DECOS[o.type].tall)) && inView(o, 60, v))].sort((a, b) => a.y - b.y);
   for (const o of order) {
     if (o === ball) drawBall();
     else if (o === feeder) drawFeeder(o, time);
     else if (o === mirror) drawMirror(o, time);
     else if (o.crab) drawCrab(o);
+    else if (o.kind === 'birdfeeder') drawBirdFeeder(o);
+    else if (o.kind === 'bughotel') drawBugHotel(o);
     else if (o.kind === 'deco') drawDeco(o, time, dk);
     else {
       use(o);
