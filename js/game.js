@@ -1,4 +1,7 @@
 // Pet Turtle: top-down, procedurally animated turtle you can call, feed, water, clean up after and play with.
+import * as snd from './sound.js';
+// play a sound for something happening at world point p (skipped when it's off screen)
+const sfx = (name, p) => { if (!p || inView(p, 80, viewRect())) snd.play(name); };
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
 let W = 0, H = 0, DPR = 1, dprCap = 2.5; // dprCap drops on slow devices (see frame())
@@ -633,7 +636,7 @@ function nudgeBall() {
   ball.vx += Math.cos(T.a) * push + rand(-40, 40);
   ball.vy += Math.sin(T.a) * push + rand(-40, 40);
   let joy = lerp(1, 7, T.traits.playful);
-  if (ball.toy === 'bell') { joy *= 1.6; emit(ball.x, ball.y - ball.r, 'note'); }
+  if (ball.toy === 'bell') { joy *= 1.6; emit(ball.x, ball.y - ball.r, 'note'); sfx('bell', ball); } else sfx('boing', ball);
   if (ball.toy === 'treat' && Math.random() < 0.4) { st.hunger = clamp(st.hunger + 4, 0, 100); emit(ball.x, ball.y, 'crumb', 5); }
   st.happy = clamp(st.happy + joy, 0, 100); T.chub = clamp(T.chub - 0.006, 0, 1); st.energy = clamp(st.energy - 0.5, 0, 100);
   emit(T.x, T.y - S, 'heart');
@@ -670,7 +673,7 @@ function think(dt) {
     T.headExt = 0.9 + Math.sin(T.eat.t * 14) * 0.15;
     if (T.eat.t > lerp(1.5, 0.75, T.traits.appetite)) { // big appetites chomp faster
       if (T.eat.f.bites === 1) earn(1, T.eat.f.x, T.eat.f.y - 10);
-      const f = T.eat.f; f.bites--; T.eat.t = 0;
+      const f = T.eat.f; f.bites--; T.eat.t = 0; sfx(f.type === 'berry' ? 'squish' : 'munch', f);
       const want = craving(T);
       if (st.hunger > 90) T.chub = clamp(T.chub + 0.02, 0, 1); // eating when already full
       st.hunger = clamp(st.hunger + (f.type === 'berry' ? 9 : 12), 0, 100);
@@ -691,7 +694,7 @@ function think(dt) {
     T.lookAt = fromBowl ? bowl : null;
     if (fromBowl) T.a += angDiff(T.a, Math.atan2(bowl.y - T.y, bowl.x - T.x)) * Math.min(1, dt * 3); // face the water
     T.headExt = 1 + Math.sin(T.drinkT * 9) * 0.1;
-    if (Math.random() < dt * 4) emit(mouth().x, mouth().y, 'ripple');
+    if (Math.random() < dt * 4) { emit(mouth().x, mouth().y, 'ripple'); sfx('sip', T); }
     st.thirst = clamp(st.thirst + dt * 16, 0, 100);
     if (fromBowl) {
       bowl.level = clamp(bowl.level - dt * 0.09 / BOWLS[up.bowl].cap, 0, 1);
@@ -745,7 +748,8 @@ function think(dt) {
   if (st.energy < 30) want *= lerp(0.55, 1, st.energy / 30);
   if (st.warm < MOOD.cold) want *= 0.6;
   if (T.chub > MOOD.chubby) want *= lerp(1, 0.7, (T.chub - MOOD.chubby) / (1 - MOOD.chubby));
-  T.swim = inPond(T);
+  const wasSwim = T.swim; T.swim = inPond(T);
+  if (T.swim && !wasSwim && !T.off) sfx('splash', T);
   if (T.swim && T.mud > 0) { T.mud = 0; for (let i = 0; i < 8; i++) emit(T.x, T.y, 'drop'); } // a dip rinses the mud off
   if (T.swim) { want *= 0.8; st.happy = clamp(st.happy + dt * (0.2 + T.traits.playful * 0.5), 0, 100); if (T.v > 5 && Math.random() < dt * 3) emit(toWorld(-0.9, 0).x, toWorld(-0.9, 0).y, 'ripple'); }
   if (st.health < SICK) want *= st.health < 8 ? 0.15 : 0.5;
@@ -767,7 +771,7 @@ function think(dt) {
     if (T.gut[i] <= 0) {
       T.gut.splice(i, 1);
       const p = toWorld(-1.5, rand(-0.2, 0.2));
-      if (poops.length < 12) { const q = { x: p.x, y: p.y, s: rand(0.85, 1.15), born: 0 }; keepInYard(q); poops.push(q); }
+      if (poops.length < 12) { const q = { x: p.x, y: p.y, s: rand(0.85, 1.15), born: 0 }; keepInYard(q); poops.push(q); sfx('plop', q); }
     }
   }
 
@@ -906,7 +910,7 @@ function moods(t) {
 function wakeUp(t) { // nobody likes being woken up
   if (t.rest?.kind !== 'sleep') { t.rest = null; return false; }
   t.rest = null; t.st.happy = clamp(t.st.happy - 6, 0, 100);
-  emit(t.x, t.y - t.S, 'grr'); say(`😾 ${t.name} was napping and woke up grumpy`); buzz([10, 30, 10]);
+  emit(t.x, t.y - t.S, 'grr'); say(`😾 ${t.name} was napping and woke up grumpy`); buzz([10, 30, 10]); snd.play('hiss');
   return true;
 }
 
@@ -945,7 +949,7 @@ function updateStats(dt) {
   healthStep(T, dt, graceT > 0 ? GRACE : LIVE);
   if (isIdle()) st.health = Math.max(st.health, AWAY_FLOOR); // nobody's playing: like being away, sick at worst
   if (st.health < 25 && !T.warned && T.dying === undefined) {
-    T.warned = true; say(`⚠️ ${T.name} is very sick! Food & water, quick!`); buzz([60, 80, 60]);
+    T.warned = true; say(`⚠️ ${T.name} is very sick! Food & water, quick!`); buzz([60, 80, 60]); snd.play('sick');
   }
   if (st.health > 40) T.warned = false;
   if (st.health <= 0 && T.dying === undefined) { if (up.vet > 0) useVet(T, true); else die(T); }
@@ -967,13 +971,14 @@ const isIdle = () => performance.now() - lastTouch > IDLE_MS;
 function touched() {
   if (isIdle()) { graceT = GRACE_SECS; if (turtles.some(t => t.st.health < SICK)) setTimeout(() => say('Welcome back! Someone needs care 🤒 Food & water, quick!', 3500), 300); }
   lastTouch = performance.now();
+  snd.unlock();
 }
 addEventListener('pointerdown', touched, true);
 addEventListener('keydown', touched, true);
 function die(t) {
   t.dying = true; t.releasing = 2.5; t.v = 0; // reuses the release fade-out
   emit(t.x, t.y - t.S, 'sparkle', 10);
-  say(`💔 ${t.name} didn't make it…`); buzz([100, 100, 200]);
+  say(`💔 ${t.name} didn't make it…`); buzz([100, 100, 200]); snd.play('sad');
   if (sel === t) sel = turtles.find(o => o.releasing === undefined) || t;
 }
 
@@ -991,7 +996,7 @@ function grow(amount) {
   const after = stageOf(T.growth);
   if (after !== before) {
     emit(T.x, T.y, 'sparkle', 14); emit(T.x, T.y - S, 'heart', 4);
-    say(`${T.name} grew into ${aStage(after)}! 🐢`); buzz([30, 60, 30]);
+    say(`${T.name} grew into ${aStage(after)}! 🐢`); buzz([30, 60, 30]); snd.play('fanfare');
     earn(10, T.x, T.y - S * 2);
   }
 }
@@ -1624,7 +1629,7 @@ function updateLife(dt, dk) {
       f.from = { x: f.x, y: f.y }; f.to = { x: pond.x + Math.cos(f.a) * POND.rx * 1.05, y: pond.y + Math.sin(f.a) * POND.ry * 1.05 };
       f.face = Math.atan2(f.to.y - f.y, f.to.x - f.x); f.hop = 1;
     }
-    if (dk > 0.5 && (f.croak -= dt) <= 0) { f.croak = rand(4, 12); emit(f.x, f.y - 8, 'note'); }
+    if (dk > 0.5 && (f.croak -= dt) <= 0) { f.croak = rand(4, 12); emit(f.x, f.y - 8, 'note'); if (snd.soundMode() === 2) sfx('croak', f); }
   }
   // birds land, peck, and fly off when a turtle gets close
   const wantBird = day ? 1 + Math.min(4, up.yard) : 0;
@@ -1785,7 +1790,7 @@ function addFind(id) { // returns true if it's new
 function collectTreasure(tr) {
   loot.treasures = loot.treasures.filter(x => x !== tr);
   const it = ITEMS[tr.id], isNew = addFind(tr.id), got = isNew ? 3 : 6; // doubles turn into extra stars
-  earn(got, tr.x, tr.y - 20); emit(tr.x, tr.y, 'sparkle', 14); buzz([20, 40, 20]);
+  earn(got, tr.x, tr.y - 20); emit(tr.x, tr.y, 'sparkle', 14); buzz([20, 40, 20]); snd.play('treasure');
   job('treasure');
   showFind(it.icon, it.name, isNew ? `New for your book! · ${RARITY[it.rar]}` : `You have ${loot.found[it.id]} of these · +${got} ⭐`, it.fact);
   save();
@@ -1793,7 +1798,7 @@ function collectTreasure(tr) {
 function openGift() {
   const g = loot.gift; loot.gift = null;
   const big = MILESTONES[loot.visits], got = big || Math.round(rand(8, 16) + Math.min(10, loot.visits * 0.3));
-  earn(got, g.x, g.y - 30); emit(g.x, g.y, 'sparkle', 18); buzz([20, 40, 20, 40, 20]);
+  earn(got, g.x, g.y - 30); emit(g.x, g.y, 'sparkle', 18); buzz([20, 40, 20, 40, 20]); snd.play('gift');
   let line = `+${got} ⭐`, it = null;
   if (big || Math.random() < 0.35) { // sometimes there's a find inside (milestone gifts: always a rare one)
     it = ITEMS[rollItem(null, big ? 3 : 0)];
@@ -1815,7 +1820,7 @@ findEl.querySelector('button').onclick = () => {
   findEl.hidden = true;
   if (!pendingReward) return;
   const set = pendingReward, d = DECOS[set.reward]; pendingReward = null;
-  earn(50, cam.x, cam.y);
+  earn(50, cam.x, cam.y); snd.play('fanfare');
   showFind(d.icon, `${set.name} complete!`, `+50 ⭐ and a ${d.name} for your yard`, 'Tap the yard to choose where it goes.');
   const o = newObj('deco'); o.type = set.reward; o.seed = Math.random(); startPlacing(o);
 };
@@ -1870,7 +1875,7 @@ function job(k, who = null, amount = 1) {
     if (j.have >= j.n) continue;
     if (j.k !== k && !(k === 'pet' && j.k === 'petOne' && j.who === who)) continue;
     j.have = Math.min(j.n, j.have + amount);
-    if (j.have >= j.n) { earn(JOB_STARS, cam.x, cam.y); say(`📋 Job done: ${j.text}! +${JOB_STARS} ⭐`, 3000); }
+    if (j.have >= j.n) { earn(JOB_STARS, cam.x, cam.y); snd.play('job'); say(`📋 Job done: ${j.text}! +${JOB_STARS} ⭐`, 3000); }
   }
   if (!loot.jobs.bonus && loot.jobs.list.every(j => j.have >= j.n)) {
     loot.jobs.bonus = true;
@@ -1919,6 +1924,14 @@ function openJobs() {
   jobsEl.hidden = false;
 }
 bookBtn.onclick = openBook;
+const sndBtn = document.getElementById('snd-btn');
+const showSnd = () => { sndBtn.textContent = ['🔇', '🔉', '🔊'][snd.soundMode()]; };
+showSnd();
+sndBtn.onclick = () => {
+  const m = snd.cycleMode(); showSnd();
+  say(['Sound off 🔇', 'Sound effects only 🔉 (no background sounds)', 'All sounds on 🔊'][m], 2200);
+  snd.play('click');
+};
 jobsBtn.onclick = openJobs;
 for (const el of [bookEl, jobsEl]) {
   el.querySelector('.close').onclick = () => { el.hidden = true; };
@@ -2268,9 +2281,10 @@ let hintT;
 function say(text, ms = 1800) { hint.textContent = text; hint.classList.add('show'); clearTimeout(hintT); hintT = setTimeout(() => hint.classList.remove('show'), ms); }
 
 document.querySelectorAll('#tools button').forEach(b => b.addEventListener('click', () => {
+  snd.play('click');
   if (b.dataset.act === 'water') {
     if (bowl.level < 0.5 && waterStarCool <= 0) { earn(1, bowl.x, bowl.y - bowl.r - 10); waterStarCool = 60; }
-    bowl.level = 1; bowl.fill = 1; buzz(15); job('water');
+    bowl.level = 1; bowl.fill = 1; buzz(15); job('water'); snd.play('pour');
     for (let i = 0; i < 14; i++) emit(bowl.x, bowl.y, 'drop');
     say('Fresh water!');
     return;
@@ -2305,7 +2319,7 @@ toybar.addEventListener('click', e => {
 
 // ---------- stars ----------
 function earn(n, x, y) {
-  stars += n;
+  stars += n; snd.play('star');
   parts.push({ x, y, kind: 'star', text: `+${n}⭐`, t: 0, life: 1.3, vx: 0, vy: -28 });
   starsEl.classList.remove('bump'); void starsEl.offsetWidth; starsEl.classList.add('bump');
 }
@@ -2441,14 +2455,14 @@ function tap(p) {
     if (foods.filter(f => f.slot === undefined).length >= 6) return say('That\'s plenty of food!');
     const type = foodType;
     const bites = type === 'berry' ? 2 : 3;
-    const f = { x: p.x, y: p.y, type, bites, max: bites, rot: rand(0, 6) }; keepInYard(f); foods.push(f); job('snack');
+    const f = { x: p.x, y: p.y, type, bites, max: bites, rot: rand(0, 6) }; keepInYard(f); foods.push(f); job('snack'); snd.play('drop');
     buzz(8);
   } else if (mode === 'clean') {
     const hit = poops.filter(q => dist(q, p) < Math.max(26, 30 / cam.z));
     if (!hit.length) return say(poops.length ? 'Tap right on a mess' : 'All clean! ✨');
     poops = poops.filter(q => !hit.includes(q));
     hit.forEach(q => emit(q.x, q.y, 'sparkle', 6));
-    earn(2 * hit.length, hit[0].x, hit[0].y - 14); job('scoop', null, hit.length);
+    earn(2 * hit.length, hit[0].x, hit[0].y - 14); job('scoop', null, hit.length); snd.play('scoop');
     turtles.forEach(t => t.st.happy = clamp(t.st.happy + 3 * hit.length, 0, 100)); buzz(12);
     if (!poops.length) say('Spotless! ✨');
   } else if (mode === 'play' && !ball) { // toy timed out: a new one appears where you tap
@@ -2477,12 +2491,12 @@ function pet(t) {
   job('pet', t.name);
   if (f < 0.35 && Math.random() < 0.6) { // not in the mood
     t.st.happy = clamp(t.st.happy + 1, 0, 100); t.st.social = clamp(t.st.social + 5, 0, 100);
-    setTimeout(() => emit(t.x, t.y - t.S, 'grr'), t.petT * 500);
+    setTimeout(() => { emit(t.x, t.y - t.S, 'grr'); sfx('hiss', t); }, t.petT * 500);
     buzz([10, 30, 10]);
   } else {
     t.st.happy = clamp(t.st.happy + lerp(3, 9, f), 0, 100); t.st.social = clamp(t.st.social + lerp(10, 25, f), 0, 100);
     if (t.starCool <= 0) { earn(1, t.x, t.y - t.S * 2.2); t.starCool = 8; }
-    setTimeout(() => emit(t.x, t.y - t.S, 'heart', 1 + Math.round(f * 3)), t.petT * 500);
+    setTimeout(() => { emit(t.x, t.y - t.S, 'heart', 1 + Math.round(f * 3)); sfx('chirp', t); }, t.petT * 500);
     buzz(20);
   }
 }
@@ -2496,7 +2510,7 @@ function adopt() {
   shop.hidden = true;
   const t = makeTurtle({ name, tint: pickTint(turtles), x: clamp(cam.x + rand(-80, 80), 60, YW - 60), y: clamp(cam.y + rand(-80, 80), 60, YH - 60), a: rand(-3, 3) });
   turtles.push(t); use(t); resetFeet();
-  emit(t.x, t.y, 'sparkle', 12); emit(t.x, t.y - 10, 'heart', 3);
+  emit(t.x, t.y, 'sparkle', 12); emit(t.x, t.y - 10, 'heart', 3); snd.play('hatch');
   sel = t; buzz([20, 40, 20]);
   save();
   askName('Name your new hatchling 🥚', name, n => {
@@ -2690,7 +2704,7 @@ shopList.addEventListener('click', e => {
   const r = shopRows[+i];
   if (r.action) return r.action();
   if (stars < r.cost) return;
-  stars -= r.cost; buzz([20, 40, 20]);
+  stars -= r.cost; buzz([20, 40, 20]); snd.play('buy');
   try { r.buy(); } catch (err) { stars += r.cost; save(); renderShop(); say('Oops, that didn\'t work. Your stars are back ⭐', 3000); console.error(err); return; }
   emit(cam.x, cam.y, 'sparkle', 10);
   save();
@@ -2775,6 +2789,7 @@ function frame(now) {
   updateCrabs(dt);
   updateFlies(dt, dk, v);
   updateLife(dt, dk);
+  { const pond = objOf('pond'); snd.ambience(dk, !!pond && inView(pond, POND.rx, v)); }
 
   // ----- draw (world space) -----
   drawYard(v);
@@ -2864,7 +2879,8 @@ addEventListener('pagehide', save);
 // Switching away from the app counts as being away: simulate that time when you come back.
 let hiddenAt = null;
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { hiddenAt = Date.now(); save(); return; }
+  if (document.hidden) { hiddenAt = Date.now(); save(); snd.pause(); return; }
+  snd.resume();
   if (hiddenAt === null) return;
   const away = (Date.now() - hiddenAt) / 1000;
   hiddenAt = null; last = performance.now();
