@@ -21,15 +21,19 @@ let mode = 'walk', foodType = 'lettuce';
 // ---------- yard, camera, upgrades ----------
 // Everything lives in world coordinates inside a yard of YW x YH. The camera (pan + pinch zoom)
 // maps the world onto the screen area between the HUD and the toolbar.
+// fits = how many turtles the yard has room for (adopting more needs a bigger yard)
 const YARDS = [
-  { name: 'Small', m: 1 }, { name: 'Medium', m: 1.6, cost: 60 }, { name: 'Large', m: 2.3, cost: 180 }, { name: 'Huge', m: 3.2, cost: 400 },
+  { name: 'Small', m: 1, fits: 3 }, { name: 'Medium', m: 1.6, cost: 60, fits: 5 }, { name: 'Large', m: 2.3, cost: 180, fits: 7 },
+  { name: 'Huge', m: 3.2, cost: 400, fits: 8 }, { name: 'Giant', m: 4.2, cost: 1200, fits: 10 },
 ];
 const BOWLS = [
-  { name: 'Water bowl', r: 38, cap: 1 }, { name: 'Big bowl', r: 46, cap: 2, cost: 25 }, { name: 'Fountain', r: 52, cap: 3, cost: 120, refill: true },
+  { name: 'Water bowl', r: 38, cap: 1 }, { name: 'Big bowl', r: 46, cap: 2, cost: 25 }, { name: 'Fountain', r: 52, cap: 3, cost: 120, refill: 1 },
+  { name: 'Grand fountain', r: 64, cap: 6, cost: 500, refill: 2 },
 ];
 const FEEDERS = [null,
   { name: 'Auto feeder', cost: 60, every: 45, awayEvery: 3 * 3600 },
-  { name: 'Deluxe feeder', cost: 150, every: 25, awayEvery: 1.5 * 3600, berries: true }];
+  { name: 'Deluxe feeder', cost: 150, every: 25, awayEvery: 1.5 * 3600, berries: true },
+  { name: 'Mega feeder', cost: 500, every: 14, awayEvery: 0.75 * 3600, berries: true, max: 4 }];
 const TOYS = {
   ball: { name: 'Ball', icon: '🔴', r: 13, cost: 0, push: 1, drag: 0.35, desc: 'The classic.' },
   bell: { name: 'Bell ball', icon: '🔔', r: 12, cost: 20, push: 1, drag: 0.35, desc: 'Jingles! Playtime makes turtles extra happy.' },
@@ -57,14 +61,25 @@ const DECOS = {
   bush: { name: 'Bush', icon: '🌿', cost: 15, tall: true },
   lantern: { name: 'Lantern', icon: '🏮', cost: 25, tall: true, light: true },
 };
-const MUD = { rx: 72, ry: 46 }, SLIDE = { len: 150, w: 46 }, LAMP_R = 130, SLOT = 44;
+const MUD = { rx: 72, ry: 46 }, SLIDE = { len: 150, w: 46 }, SLOT = 44;
+let LAMP_R = 130;
+// Bigger versions of placed things, bought once the smaller one is in the yard. k scales its size.
+const SIZES = {
+  hut: [null, { name: 'Big hut', k: 1.4, cost: 300, desc: 'Room for more turtles to hide and sleep.' }, { name: 'Turtle lodge', k: 1.85, cost: 900, desc: 'A grand hideout for a big turtle family.' }],
+  pond: [null, { name: 'Big pond', k: 1.4, cost: 600, needYard: 2, desc: 'More room to swim.' }, { name: 'Lake', k: 1.85, cost: 1500, needYard: 4, desc: 'A whole lake for a whole family.' }],
+  lamp: [null, { name: 'Big heat lamp', k: 1.45, cost: 350, desc: 'Warms a much bigger patch of the yard.' }, { name: 'Sun lamp', k: 1.9, cost: 900, desc: 'Warmth for the whole gang on cold nights.' }],
+  rock: [null, { name: 'Big basking rock', k: 1.5, cost: 150, desc: 'Space for several sunbathers.' }],
+  log: [null, { name: 'Long log tunnel', k: 1.5, cost: 200, desc: 'A longer, roomier tunnel.' }],
+  mud: [null, { name: 'Big mud pit', k: 1.5, cost: 250, desc: 'Room for a muddy pile-up.' }],
+};
+const sizeK = kind => SIZES[kind]?.[up.size[kind] || 0]?.k || 1;
 const GROW_MS = { lettuce: 20 * 60e3, berry: 40 * 60e3 }; // garden growing time (real time)
 let plots = [];   // garden slots: { t0 (planted, ms) }
 let crabs = [];   // clean-up crabs (not saved: they just scuttle back in)
 let flies = [];   // fireflies at night
 let arranging = false, hourOverride = null;
 const POND = { rx: 120, ry: 78 }, LOG = { len: 150, r: 40 }, HUT = { r: 54 }, ROCK = { rx: 56, ry: 36 }, FEEDER_R = 26;
-let up = { yard: 0, bowl: 0, feeder: 0, toys: ['ball'], toy: 'ball', crab: 0, vet: 0, garden: 0 };
+let up = { yard: 0, bowl: 0, feeder: 0, toys: ['ball'], toy: 'ball', crab: 0, vet: 0, garden: 0, size: {} };
 let objs = []; // placed things: { kind: 'feeder' | 'rock' | 'log' | 'hut' | 'pond', x, y }
 let stars = 0, lastDaily = '', base = null, feederT = 0, waterStarCool = 0;
 let YW = 400, YH = 600;
@@ -171,12 +186,18 @@ function applyYard() {
   const m = YARDS[up.yard].m;
   YW = Math.round(base.w * m); YH = Math.round(base.h * m);
   bowl.r = BOWLS[up.bowl].r;
+  const k = sizeK;
+  POND.rx = 120 * k('pond'); POND.ry = 78 * k('pond'); HUT.r = 54 * k('hut'); ROCK.rx = 56 * k('rock'); ROCK.ry = 36 * k('rock');
+  LOG.len = 150 * k('log'); LOG.r = 40 * (1 + (k('log') - 1) * 0.3); MUD.rx = 72 * k('mud'); MUD.ry = 46 * k('mud'); LAMP_R = 130 * k('lamp');
   for (const p of [...poops, ...foods, ...objs, bowl]) keepInYard(p);
   for (const t of turtles) { t.x = clamp(t.x, 35, YW - 35); t.y = clamp(t.y, 25, YH - 15); }
   makeDeco(); clampCam();
 }
 
-const keepInYard = p => { p.x = clamp(p.x, 24, YW - 24); p.y = clamp(p.y, 16, YH - 16); };
+const keepInYard = p => { // placed things keep their whole body inside the fence
+  const big = p === bowl || p.kind, mx = big ? Math.min(YW / 2, Math.max(24, p.kind === 'pond' ? POND.rx + 12 : hitR(p))) : 24, my = big ? Math.min(YH / 2, Math.max(16, p.kind === 'pond' ? POND.ry + 10 : hitR(p) * 0.8)) : 16;
+  p.x = clamp(p.x, mx, YW - mx); p.y = clamp(p.y, my, YH - my);
+};
 const viewH = () => H - TOP - BOTTOM;
 const vcx = () => W / 2, vcy = () => TOP + viewH() / 2; // screen point the camera centers on
 const zMin = () => Math.min(1, W / YW, viewH() / YH);   // zoomed all the way out = whole yard fits
@@ -283,7 +304,7 @@ function load() {
   poops = d.poops || []; bowl.level = d.level ?? 1; foods = d.foods || [];
   turtles = d.turtles.map(o => makeTurtle({ ...o, gut: o.gut || [] }));
   sel = turtles[d.sel] || turtles[0];
-  base = d.base || null; up = { ...up, ...(d.up || {}) }; objs = d.objs || []; plots = d.plots || [];
+  base = d.base || null; up = { ...up, ...(d.up || {}) }; up.size = { ...(up.size || {}) }; objs = d.objs || []; plots = d.plots || [];
   stars = d.stars ?? 30; lastDaily = d.lastDaily || '';
   if (d.bowlPos) Object.assign(bowl, d.bowlPos);
   if (d.cam) Object.assign(cam, d.cam);
@@ -319,7 +340,7 @@ function simulateAway(secs) {
   for (let i = 0; i < n; i++) {
     const simNow = t0ms + (i + 1) * dt * 1000;
     grown += gardenTick(simNow);
-    if (B.refill) bowl.level = Math.min(1, bowl.level + dt / 7200); // fountain: full again every ~2 h
+    if (B.refill) bowl.level = Math.min(1, bowl.level + dt * B.refill / 7200); // fountain: full again every ~2 h (grand: 1 h)
     if (feeder) {
       feedAcc += dt;
       if (feedAcc >= F.awayEvery) {
@@ -1207,12 +1228,12 @@ function drawCrab(c) {
 }
 
 // ---------- veggie garden ----------
-const gardenCols = () => (up.garden > 1 ? 3 : 2);
+const gardenCols = () => [2, 2, 3, 4][up.garden] || 2;
 function slotPos(i) {
   const g = objOf('garden'), cols = gardenCols();
   return { x: g.x + ((i % cols) - (cols - 1) / 2) * SLOT, y: g.y + (Math.floor(i / cols) - 0.5) * SLOT };
 }
-const slotType = i => (up.garden > 1 && i % 3 === 1 ? 'berry' : 'lettuce');
+const slotType = i => (up.garden > 2 ? (i % 2 === 1 ? 'berry' : 'lettuce') : up.garden > 1 && i % 3 === 1 ? 'berry' : 'lettuce');
 function ensurePlots() {
   if (!up.garden) return;
   const n = gardenCols() * 2;
@@ -1712,7 +1733,7 @@ cv.addEventListener('wheel', e => { // desktop zoom
 const nameOf = o => o === bowl ? BOWLS[up.bowl].name : o.kind === 'feeder' ? FEEDERS[up.feeder].name
   : o.kind === 'deco' ? DECOS[o.type].name : (AUTO[o.kind] || STRUCTS[o.kind]).name;
 const HIT = { pond: 100, rock: 50, log: 75, hut: HUT.r, garden: 55, mud: 60, slide: 75, mirror: 32, lamp: 30, feeder: 30, deco: 24 };
-const hitR = o => (o === bowl ? bowl.r : HIT[o.kind] || 30);
+const hitR = o => (o === bowl ? bowl.r : o.kind === 'garden' ? gardenCols() * SLOT / 2 + 10 : (HIT[o.kind] || 30) * sizeK(o.kind));
 const movables = () => [bowl, ...objs];
 const doneBtn = document.getElementById('arrange-done');
 function startArrange() {
@@ -1795,7 +1816,7 @@ function pet(t) {
 
 // ---------- adopting more turtles ----------
 // bought in the shop; each extra turtle costs a bit more
-const adoptCost = () => 25 * turtles.length;
+const adoptCost = () => Math.round(25 * turtles.length ** 1.6 / 5) * 5; // 25, 75, 145 ... ~840 for the 10th
 function adopt() {
   const used = new Set(turtles.map(t => t.name));
   const suggestion = NAMES.find(n => !used.has(n)) || `Turtle ${turtles.length + 1}`;
@@ -1856,28 +1877,30 @@ function startPlacing(o) {
 function buildShop() {
   const rows = [], yNext = YARDS[up.yard + 1], bNext = BOWLS[up.bowl + 1], fNext = FEEDERS[up.feeder + 1];
   rows.push({ sec: `🐢 Turtles · ${turtles.length}/${MAX_TURTLES}` });
-  rows.push(turtles.length < MAX_TURTLES
-    ? { icon: '🥚', name: 'Adopt a hatchling', desc: 'A new baby turtle with its own personality and colors.', cost: adoptCost(), buy: adopt }
-    : { icon: '🥚', name: 'Adopt a hatchling', desc: 'Your yard is full of turtles!', done: 'Full' });
+  const fits = YARDS[up.yard].fits;
+  rows.push(turtles.length >= MAX_TURTLES ? { icon: '🥚', name: 'Adopt a hatchling', desc: 'Your yard is full of turtles!', done: 'Full' }
+    : turtles.length >= fits ? { icon: '🥚', name: 'Adopt a hatchling', desc: `A ${YARDS[up.yard].name.toLowerCase()} yard has room for ${fits} turtles.`, locked: 'Needs a bigger yard' }
+      : { icon: '🥚', name: 'Adopt a hatchling', desc: 'A new baby turtle with its own personality and colors.', cost: adoptCost(), buy: adopt });
   rows.push({ sec: '🏡 Yard' });
   rows.push(yNext
-    ? { icon: '🏡', name: `${yNext.name} yard`, desc: `More room to roam. Drag to look around, pinch to zoom.`, cost: yNext.cost, buy: () => { up.yard++; applyYard(); say('Bigger yard! Drag to look around · pinch to zoom', 3500); } }
-    : { icon: '🏡', name: 'Huge yard', desc: 'The biggest yard there is.', done: 'Maxed' });
+    ? { icon: '🏡', name: `${yNext.name} yard`, desc: `More room to roam, and space for ${yNext.fits} turtles.`, cost: yNext.cost, buy: () => { up.yard++; applyYard(); say('Bigger yard! Drag to look around · pinch to zoom', 3500); } }
+    : { icon: '🏡', name: `${YARDS[up.yard].name} yard`, desc: 'The biggest yard there is.', done: 'Maxed' });
   rows.push({ icon: '✋', name: 'Arrange yard', desc: 'Drag things to new spots. Tap a decoration to remove it.', action: startArrange, btn: 'Arrange' });
   rows.push({ sec: '🤖 Care & automation' });
   rows.push(bNext
-    ? { icon: bNext.refill ? '⛲' : '🥣', name: bNext.name, desc: bNext.refill ? 'Refills itself, even while you\'re away.' : 'Holds twice as much water.', cost: bNext.cost, buy: () => { up.bowl++; applyYard(); } }
-    : { icon: '⛲', name: 'Fountain', desc: 'Refills itself, even while you\'re away.', done: 'Maxed' });
+    ? { icon: bNext.refill ? '⛲' : '🥣', name: bNext.name, desc: bNext.refill > 1 ? 'Twice the water, refills twice as fast. Built for a crowd.' : bNext.refill ? 'Refills itself, even while you\'re away.' : 'Holds twice as much water.', cost: bNext.cost, buy: () => { up.bowl++; applyYard(); } }
+    : { icon: '⛲', name: BOWLS[up.bowl].name, desc: 'Plenty of water for everyone.', done: 'Maxed' });
   rows.push(fNext
-    ? { icon: '🥫', name: fNext.name, desc: up.feeder ? 'Feeds more often and adds strawberries.' : 'Drops food when turtles get hungry, even while you\'re away.', cost: fNext.cost, buy: () => { up.feeder++; if (!objOf('feeder')) startPlacing(newObj('feeder')); } }
-    : { icon: '🥫', name: 'Deluxe feeder', desc: 'Feeding on autopilot.', done: 'Maxed' });
+    ? { icon: '🥫', name: fNext.name, desc: fNext.max ? 'Feeds a crowd: more often, more food at once.' : up.feeder ? 'Feeds more often and adds strawberries.' : 'Drops food when turtles get hungry, even while you\'re away.', cost: fNext.cost, buy: () => { up.feeder++; if (!objOf('feeder')) startPlacing(newObj('feeder')); } }
+    : { icon: '🥫', name: FEEDERS[up.feeder].name, desc: 'Feeding on autopilot.', done: 'Maxed' });
   rows.push(!up.garden ? { icon: '🥬', name: AUTO.garden.name, desc: AUTO.garden.desc, cost: AUTO.garden.cost, buy: () => { up.garden = 1; ensurePlots(); startPlacing(newObj('garden')); } }
     : up.garden === 1 ? { icon: '🍓', name: 'Big garden', desc: 'Six plots, and strawberries too.', cost: 140, buy: () => { up.garden = 2; ensurePlots(); } }
-      : { icon: '🍓', name: 'Big garden', desc: 'Lettuce and strawberries on tap.', done: 'Maxed' });
+      : up.garden === 2 ? { icon: '🍓', name: 'Huge garden', desc: 'Eight plots, half of them strawberries.', cost: 450, buy: () => { up.garden = 3; ensurePlots(); const g = objOf('garden'); if (g) keepInYard(g); } }
+        : { icon: '🍓', name: 'Huge garden', desc: 'Lettuce and strawberries on tap.', done: 'Maxed' });
   rows.push(up.crab === 0 ? { icon: '🦀', name: 'Clean-up crab', desc: 'Scuttles around scooping up poop, even while you\'re away.', cost: 90, buy: () => { up.crab = 1; syncCrabs(); } }
-    : up.crab === 1 ? { icon: '🦀', name: 'Second crab', desc: 'Twice the tidying.', cost: 160, buy: () => { up.crab = 2; syncCrabs(); } }
-      : { icon: '🦀', name: 'Crab crew', desc: 'Two crabs on poop patrol.', done: 'Maxed' });
-  rows.push(objOf('lamp') ? { icon: AUTO.lamp.icon, name: AUTO.lamp.name, desc: AUTO.lamp.desc, done: 'Placed' }
+    : up.crab < 4 ? { icon: '🦀', name: ['', 'Second crab', 'Third crab', 'Fourth crab'][up.crab], desc: 'More tidying for more turtles.', cost: [0, 160, 320, 600][up.crab], buy: () => { up.crab++; syncCrabs(); } }
+      : { icon: '🦀', name: 'Crab crew', desc: 'Four crabs on poop patrol.', done: 'Maxed' });
+  rows.push(objOf('lamp') ? sizeRow('lamp', AUTO.lamp)
     : { icon: AUTO.lamp.icon, name: AUTO.lamp.name, desc: AUTO.lamp.desc, cost: AUTO.lamp.cost, buy: () => startPlacing(newObj('lamp')) });
   rows.push({ icon: '💊', name: 'Vet kit', desc: `Cures sickness instantly, and saves a turtle that's about to die. You have ${up.vet}.`, cost: 40, buy: () => { up.vet++; say('Vet kits are used from a turtle\'s menu (tap its name)', 3000); } });
   rows.push({ sec: '🎾 Toys' });
@@ -1887,7 +1910,7 @@ function buildShop() {
   }
   rows.push({ sec: '🪨 Play structures' });
   for (const [k, sd] of Object.entries(STRUCTS)) {
-    if (objOf(k)) rows.push({ icon: sd.icon, name: sd.name, desc: sd.desc, done: 'Placed' });
+    if (objOf(k)) rows.push(sizeRow(k, sd));
     else rows.push({ icon: sd.icon, name: sd.name, desc: sd.desc, cost: sd.cost, locked: sd.needYard && up.yard < sd.needYard ? 'Needs a Medium yard' : null, buy: () => startPlacing(newObj(k)) });
   }
   rows.push({ sec: '🌷 Decorations' });
@@ -1896,6 +1919,16 @@ function buildShop() {
     rows.push({ icon: dd.icon, name: dd.name, desc: (dd.light ? 'Glows at night. ' : '') + (n ? `You have ${n}.` : 'Buy as many as you like.'), cost: dd.cost, buy: () => { const o = newObj('deco'); o.type = k; o.seed = Math.random(); startPlacing(o); } });
   }
   return rows;
+}
+// a placed thing: offer the next size up, if there is one
+function sizeRow(kind, base) {
+  const lv = up.size[kind] || 0, nx = SIZES[kind]?.[lv + 1];
+  if (!nx) return { icon: base.icon, name: lv ? SIZES[kind][lv].name : base.name, desc: base.desc, done: lv ? 'Biggest' : 'Placed' };
+  return {
+    icon: base.icon, name: nx.name, desc: nx.desc, cost: nx.cost,
+    locked: nx.needYard && up.yard < nx.needYard ? `Needs a ${YARDS[nx.needYard].name} yard` : null,
+    buy: () => { up.size[kind] = lv + 1; applyYard(); const o = objOf(kind); if (o) { keepInYard(o); emit(o.x, o.y, 'sparkle', 16); } say(`${nx.name}! ✨`); },
+  };
 }
 function renderShop() {
   shopRows = buildShop();
@@ -1983,13 +2016,13 @@ function frame(now) {
   separate();
   updateBall(dt);
   bowl.fill = Math.max(0, bowl.fill - dt);
-  if (BOWLS[up.bowl].refill) bowl.level = Math.min(1, bowl.level + dt / 600); // fountain tops itself up
+  if (BOWLS[up.bowl].refill) bowl.level = Math.min(1, bowl.level + dt * BOWLS[up.bowl].refill / 600); // fountain tops itself up
   const feeder = up.feeder && objOf('feeder');
   if (feeder) {
     const F = FEEDERS[up.feeder];
     if ((feederT += dt) > F.every) {
       feederT = 0;
-      if (foods.filter(f => f.slot === undefined).length < 6 && foods.filter(f => f.fromFeeder).length < 2 && turtles.some(t => t.st.hunger < 65)) {
+      if (foods.filter(f => f.slot === undefined).length < 6 && foods.filter(f => f.fromFeeder).length < (F.max || 2) && turtles.some(t => t.st.hunger < 65)) {
         const f = feederFood(feeder, F); foods.push(f); emit(f.x, f.y, 'crumb', 6);
       }
     }

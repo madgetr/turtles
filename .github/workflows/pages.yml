@@ -1,4 +1,6 @@
 # Publishes the web version of Pet Turtle to GitHub Pages on every push to main.
+# Build and deploy are separate jobs (like GitHub's own template): the deploy job only starts once
+# the uploaded site is fully saved. In one job, deploy sometimes couldn't find the upload yet.
 name: Publish to GitHub Pages
 
 on:
@@ -13,14 +15,11 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -32,5 +31,13 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: www
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5
