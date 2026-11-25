@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#3d5a2a">
+<title>Pet Turtle</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #3d5a2a; font-family: system-ui, sans-serif; touch-action: none; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #hud { position: fixed; top: 0; left: 0; right: 0; padding: calc(env(safe-area-inset-top) + 10px) 12px 10px;
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+    background: linear-gradient(#000a, #0000); pointer-events: none; }
+  .stat { display: flex; align-items: center; gap: 4px; color: #fff; font-size: 15px; }
+  .bar { flex: 1; height: 10px; border-radius: 6px; background: #0006; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 50%; border-radius: 6px; background: #8fd16a; transition: width .3s, background .3s; }
+  #tools { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 10px calc(env(safe-area-inset-bottom) + 12px);
+    display: flex; justify-content: space-around; gap: 6px; background: linear-gradient(#0000, #000a); }
+  #tools button { flex: 1; max-width: 86px; border: 0; border-radius: 18px; padding: 8px 0 6px; background: #fff3; color: #fff;
+    font-size: 26px; line-height: 1.1; backdrop-filter: blur(6px); }
+  #tools button span { display: block; font-size: 11px; font-weight: 600; letter-spacing: .03em; }
+  #tools button.on { background: #fffd; color: #2c4020; box-shadow: 0 0 0 3px #b8f08c; }
+  #tools button:active { transform: scale(.94); }
+  #stage { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 38px); transform: translateX(-50%);
+    color: #fff; font-size: 13px; font-weight: 600; text-shadow: 0 1px 3px #000a; white-space: nowrap; padding: 4px 10px; cursor: pointer; max-width: calc(100vw - 130px); overflow: hidden; text-overflow: ellipsis; }
+  #adopt { position: fixed; right: 10px; top: calc(env(safe-area-inset-top) + 34px); border: 0; border-radius: 14px;
+    padding: 4px 10px; background: #fff3; color: #fff; font-size: 15px; font-weight: 700; backdrop-filter: blur(6px); }
+  #adopt:active, #stars:active { transform: scale(.94); }
+  #stars { position: fixed; left: 10px; top: calc(env(safe-area-inset-top) + 34px); border: 0; border-radius: 14px;
+    padding: 4px 10px; background: #0005; color: #ffd84a; font-size: 15px; font-weight: 800; backdrop-filter: blur(6px); }
+  #stars.bump { animation: bump .4s; }
+  @keyframes bump { 40% { transform: scale(1.25); } }
+  #toybar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 92px);
+    display: flex; gap: 6px; padding: 5px; border-radius: 18px; background: #0006; backdrop-filter: blur(6px); }
+  #toybar[hidden] { display: none; }
+  #arrange-done { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 96px);
+    border: 0; border-radius: 16px; padding: 10px 18px; background: #5d8a3a; color: #fff; font-size: 16px; font-weight: 700; box-shadow: 0 4px 14px #0006; }
+  #arrange-done[hidden] { display: none; }
+  #menu button[hidden] { display: none; }
+  #toybar button { border: 0; border-radius: 13px; width: 44px; height: 40px; font-size: 22px; background: #fff2; }
+  #toybar button.on { background: #fffd; box-shadow: 0 0 0 2px #b8f08c; }
+  #shop { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-end; justify-content: center; z-index: 9; }
+  #shop[hidden] { display: none; }
+  #shop .card { width: min(420px, 96vw); max-height: 78vh; overflow: auto; margin-bottom: calc(env(safe-area-inset-bottom) + 10px);
+    background: #fbf6e8; color: #2c3320; border-radius: 20px; padding: 12px 14px 16px; }
+  #shop .head { display: flex; align-items: center; gap: 10px; position: sticky; top: -12px; background: #fbf6e8; padding: 4px 0 8px; }
+  #shop .head b { font-size: 20px; flex: 1; }
+  #shop-stars { font-weight: 800; color: #b8860b; }
+  #shop-close { border: 0; background: #e9e1c8; border-radius: 12px; width: 34px; height: 34px; font-size: 16px; }
+  #shop .sec { font-weight: 700; font-size: 13px; color: #6b6a55; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .04em; }
+  #shop .row { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid #0000000d; }
+  #shop .ic { font-size: 26px; text-align: center; }
+  #shop small { display: block; color: #6b6a55; font-size: 12px; line-height: 1.3; }
+  #shop .row button { border: 0; border-radius: 12px; padding: 8px 11px; background: #5d8a3a; color: #fff; font-weight: 700; font-size: 14px; white-space: nowrap; }
+  #shop .row button:disabled { background: #cfc7ae; color: #fff; }
+  #shop .row button.move { background: #e9e1c8; color: #2c3320; }
+  #shop .done { color: #6b6a55; font-size: 12px; font-weight: 600; }
+  #away { position: fixed; inset: 0; background: #0008; display: grid; place-items: center; z-index: 10; }
+  #away[hidden] { display: none; }
+  #away .card { width: min(360px, 90vw); max-height: 80vh; overflow: auto; background: #fbf6e8; color: #2c3320; border-radius: 20px; padding: 18px 18px 14px; box-shadow: 0 10px 40px #0008; }
+  #away h2 { margin: 0 0 6px; font-size: 20px; }
+  #away .when { color: #6b6a55; font-size: 13px; margin-bottom: 10px; }
+  #away .who { font-weight: 700; margin-bottom: 2px; }
+  #away .body { font-size: 14px; line-height: 1.45; }
+  #away hr { border: 0; border-top: 1px solid #0001; margin: 10px 0; }
+  #away button { width: 100%; margin-top: 14px; border: 0; border-radius: 14px; padding: 11px; background: #5d8a3a; color: #fff; font-size: 16px; font-weight: 700; }
+  #menu { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-end; justify-content: center; z-index: 9; }
+  #menu[hidden] { display: none; }
+  #menu .card { width: min(380px, 94vw); margin-bottom: calc(env(safe-area-inset-bottom) + 16px); background: #fbf6e8; border-radius: 20px; padding: 14px; display: grid; gap: 8px; }
+  #menu .title { text-align: center; font-weight: 700; color: #2c3320; padding: 2px 0 4px; }
+  #menu .persona { text-align: center; color: #6b6a55; font-size: 13px; font-style: italic; margin-top: -8px; }
+  #menu .traits { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; padding: 4px 18px 8px; font-size: 14px; color: #2c3320; }
+  #menu .dots { color: #5d8a3a; letter-spacing: 3px; text-align: right; }
+  #menu .dots span { color: #d9d0b4; }
+  #menu button { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
+  #menu button:disabled { opacity: .4; }
+  #menu button.ghost { background: transparent; color: #6b6a55; }
+  #hint { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 146px); transform: translateX(-50%);
+    background: #000a; color: #fff; padding: 6px 14px; border-radius: 14px; font-size: 14px; white-space: nowrap;
+    opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #hint.show { opacity: 1; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="stat">❤️<div class="bar"><i id="b-health"></i></div></div>
+  <div class="stat">🥬<div class="bar"><i id="b-hunger"></i></div></div>
+  <div class="stat">💧<div class="bar"><i id="b-thirst"></i></div></div>
+  <div class="stat">🧼<div class="bar"><i id="b-clean"></i></div></div>
+  <div class="stat">💚<div class="bar"><i id="b-happy"></i></div></div>
+</div>
+<div id="stage"></div>
+<button id="stars">⭐ 0</button>
+<div id="toybar" hidden></div>
+<button id="arrange-done" hidden>✓ Done arranging</button>
+<div id="hint"></div>
+<div id="shop" hidden><div class="card">
+  <div class="head"><b>Shop</b><span id="shop-stars"></span><button id="shop-close">✕</button></div>
+  <div id="shop-list"></div>
+</div></div>
+<div id="menu" hidden><div class="card">
+  <div class="title"></div>
+  <div class="persona"></div>
+  <div class="traits"></div>
+  <button id="m-rename">✏️ Rename</button>
+  <button id="m-vet" hidden>💊 Use vet kit</button>
+  <button id="m-release">🌿 Release to the wild</button>
+  <button id="m-close" class="ghost">Cancel</button>
+</div></div>
+<div id="away" hidden><div class="card"><h2>Welcome back! 🐢</h2><div class="body"></div><button id="away-ok">Check on them</button></div></div>
+<div id="tools">
+  <button data-mode="walk" class="on">👆<span>Call</span></button>
+  <button data-mode="food">🥬<span>Feed</span></button>
+  <button data-act="water">💧<span>Water</span></button>
+  <button data-mode="clean">🧹<span>Clean</span></button>
+  <button data-mode="play">🎾<span>Play</span></button>
+</div>
+<script type="module" src="js/game.js"></script>
+</body>
+</html>

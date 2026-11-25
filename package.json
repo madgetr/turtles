@@ -1,0 +1,18 @@
+{
+  "name": "pet-turtle",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev": "python tools/serve.py 5200"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/core": "^8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^4.0.0",
+    "@capacitor/cli": "^8.6.2",
+    "sharp": "^0.35.5"
+  }
+}

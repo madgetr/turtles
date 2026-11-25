@@ -1,0 +1,7 @@
+{
+  "appId": "dev.petturtle",
+  "appName": "Pet Turtle",
+  "webDir": "www",
+  "backgroundColor": "#3d5a2a",
+  "android": { "backgroundColor": "#3d5a2a" }
+}
