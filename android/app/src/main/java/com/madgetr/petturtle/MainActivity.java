@@ -1,4 +1,4 @@
-package dev.petturtle;
+package com.madgetr.petturtle;
 
 import android.os.Build;
 import android.os.Bundle;
@@ -11,7 +11,7 @@ import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 
 /**
- * Pet Turtle runs edge to edge in immersive mode: status and navigation bars are
+ * Turtle Yard runs edge to edge in immersive mode: status and navigation bars are
  * hidden (a swipe from the edge shows them briefly), the game draws under display
  * cutouts.
  */

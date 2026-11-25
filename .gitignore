@@ -1,3 +1,7 @@
 node_modules/
 www/
 android/local.properties
+android/keystore.properties
+*.jks
+*.keystore
+*.aab

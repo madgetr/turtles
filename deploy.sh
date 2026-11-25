@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Pet Turtle as a native Android app and install it on a connected phone.
+# Build Turtle Yard as a native Android app and install it on a connected phone.
 #   ./deploy.sh              build + install + launch on the only/first USB device
 #   ./deploy.sh <serial>     pick a device (see `adb devices`)
 #   ./deploy.sh --apk        just build the APK (android/app/build/outputs/apk/debug/)
@@ -30,5 +30,5 @@ SERIAL="${1:-$("$ADB" devices | awk 'NR>1 && $2=="device" && $1 !~ /^(emulator|1
 [ -z "$SERIAL" ] && { echo "No phone found (adb devices)"; exit 1; }
 echo "› installing on $SERIAL"
 "$ADB" -s "$SERIAL" install -r "$APK" >/dev/null
-"$ADB" -s "$SERIAL" shell monkey -p dev.petturtle -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-echo "✔ Pet Turtle launched on $SERIAL"
+"$ADB" -s "$SERIAL" shell monkey -p com.madgetr.petturtle -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+echo "✔ Turtle Yard launched on $SERIAL"

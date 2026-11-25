@@ -1,14 +1,14 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "dev.petturtle"
+    namespace = "com.madgetr.petturtle"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "dev.petturtle"
+        applicationId "com.madgetr.petturtle"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +16,20 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release signing: android/keystore.properties (git-ignored) points at the upload key kept outside the repo.
+    def ksProps = rootProject.file('keystore.properties')
+    signingConfigs {
+        release {
+            if (ksProps.exists()) {
+                def p = new Properties(); ksProps.withInputStream { p.load(it) }
+                storeFile file(p['storeFile']); storePassword p['storePassword']
+                keyAlias p['keyAlias']; keyPassword p['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            if (ksProps.exists()) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

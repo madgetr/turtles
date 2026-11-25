@@ -1,6 +1,6 @@
 {
-  "appId": "dev.petturtle",
-  "appName": "Pet Turtle",
+  "appId": "com.madgetr.petturtle",
+  "appName": "Turtle Yard",
   "webDir": "www",
   "backgroundColor": "#3d5a2a",
   "android": { "backgroundColor": "#3d5a2a" }
