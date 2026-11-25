@@ -1,7 +1,7 @@
 // Pet Turtle: top-down, procedurally animated turtle you can call, feed, water, clean up after and play with.
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
-let W = 0, H = 0, DPR = 1;
+let W = 0, H = 0, DPR = 1, dprCap = 2.5; // dprCap drops on slow devices (see frame())
 let TOP = 70, BOTTOM = 110; // space taken by the HUD and toolbar (CSS px), measured from the page in resize()
 
 // ---------- helpers ----------
@@ -16,7 +16,7 @@ const buzz = ms => navigator.vibrate && navigator.vibrate(ms);
 // ---------- world state ----------
 const bowl = { x: 0, y: 0, r: 38, level: 1, fill: 0 };
 let foods = [], poops = [], parts = [], ball = null, marker = null;
-let mode = 'walk', foodToggle = 0;
+let mode = 'walk', foodType = 'lettuce';
 
 // ---------- yard, camera, upgrades ----------
 // Everything lives in world coordinates inside a yard of YW x YH. The camera (pan + pinch zoom)
@@ -131,7 +131,8 @@ function makeTurtle(o = {}) {
     ...o,
   };
   if (!t.tint) t.tint = o.hue ? { shell: clamp(o.hue * 0.5, -28, 28), skin: clamp(o.hue * 0.3, -18, 18), light: rand(-0.12, 0.12) } : randomTint();
-  t.st = { hunger: 80, thirst: 80, happy: 70, health: 100, ...(o.st || {}) };
+  t.st = { hunger: 80, thirst: 80, happy: 70, health: 100, social: 80, energy: 85, warm: 90, ...(o.st || {}) }; // last three are hidden moods
+  t.chub = o.chub || 0; t.diet = o.diet || []; // chub: 0 = trim, 1 = very round; diet = last few foods eaten
   t.traits = { ...randomTraits(), ...(o.traits || {}) };
   t.S = sizeFor(t.growth);
   return t;
@@ -156,7 +157,7 @@ function resetFeet() {
 
 // ---------- layout, camera, background ----------
 function resize() {
-  DPR = Math.min(devicePixelRatio || 1, 2.5);
+  DPR = Math.min(devicePixelRatio || 1, dprCap);
   W = innerWidth; H = innerHeight;
   cv.width = W * DPR; cv.height = H * DPR;
   // the HUD grows with the phone's status bar / camera cutout, so measure it instead of guessing
@@ -230,19 +231,24 @@ function drawYard(v) {
   worldTransform();
   c.fillStyle = '#0003'; c.fillRect(6, 8, YW, YH);
   c.fillStyle = sandPat; c.fillRect(0, 0, YW, YH);
+  // one path per colour: hundreds of separate little strokes are what slows small tablets down
+  const peb = PEBBLE.map(() => new Path2D()), shine = new Path2D(), grass = GRASS.map(() => new Path2D());
   for (const d of deco) {
     if (!inView(d, 30, v)) continue;
     if (d.t === 'pebble') {
-      c.fillStyle = PEBBLE[d.c]; c.beginPath(); c.ellipse(d.x, d.y, d.s, d.s * 0.75, d.rot, 0, 7); c.fill();
-      c.fillStyle = '#ffffff40'; c.beginPath(); c.ellipse(d.x - d.s * 0.3, d.y - d.s * 0.3, d.s * 0.35, d.s * 0.25, 0, 0, 7); c.fill();
+      const P = peb[d.c]; P.moveTo(d.x + d.s * Math.cos(d.rot), d.y + d.s * Math.sin(d.rot)); P.ellipse(d.x, d.y, d.s, d.s * 0.75, d.rot, 0, 7);
+      const hx = d.x - d.s * 0.3, hy = d.y - d.s * 0.3; shine.moveTo(hx + d.s * 0.35, hy); shine.ellipse(hx, hy, d.s * 0.35, d.s * 0.25, 0, 0, 7);
     } else {
-      c.lineWidth = 2; c.lineCap = 'round';
       for (const b of d.blades) {
-        c.strokeStyle = GRASS[b.c]; c.beginPath(); c.moveTo(d.x, d.y);
-        c.quadraticCurveTo(d.x + Math.cos(b.a) * b.l * 0.5 + 3, d.y + Math.sin(b.a) * b.l * 0.5, d.x + Math.cos(b.a) * b.l, d.y + Math.sin(b.a) * b.l); c.stroke();
+        const G = grass[b.c]; G.moveTo(d.x, d.y);
+        G.quadraticCurveTo(d.x + Math.cos(b.a) * b.l * 0.5 + 3, d.y + Math.sin(b.a) * b.l * 0.5, d.x + Math.cos(b.a) * b.l, d.y + Math.sin(b.a) * b.l);
       }
     }
   }
+  peb.forEach((P, i) => { c.fillStyle = PEBBLE[i]; c.fill(P); });
+  c.fillStyle = '#ffffff40'; c.fill(shine);
+  c.lineWidth = 2; c.lineCap = 'round';
+  grass.forEach((G, i) => { c.strokeStyle = GRASS[i]; c.stroke(G); });
   // wooden fence
   c.strokeStyle = '#6b4a2a'; c.lineWidth = 7; c.strokeRect(-4, -4, YW + 8, YH + 8);
   c.strokeStyle = '#9a6e40'; c.lineWidth = 3; c.strokeRect(-4, -4, YW + 8, YH + 8);
@@ -253,7 +259,7 @@ function drawYard(v) {
 
 // ---------- persistence ----------
 const SAVE = 'turtle-save-v2', OLD_SAVE = 'turtle-save-v1';
-const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud'];
+const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud', 'chub', 'diet'];
 function save() {
   localStorage.setItem(SAVE, JSON.stringify({
     turtles: turtles.filter(t => t.releasing === undefined).map(t => Object.fromEntries(KEEP.map(k => [k, t[k]]))),
@@ -335,6 +341,8 @@ function simulateAway(secs) {
         const f = foods.shift();
         if (f.slot !== undefined && plots[f.slot]) plots[f.slot].t0 = simNow; // garden replants itself
         s.hunger = clamp(s.hunger + f.bites * 12, 0, 100); r.ate++;
+        t.diet.push(f.type); if (t.diet.length > 6) t.diet.shift();
+        if (f.type === 'berry') t.chub = clamp(t.chub + 0.05, 0, 1);
         t.growth = clamp(t.growth + f.bites * 0.003 * GROW_RATE * 0.8, 0, 1);
         t.gut.push(rand(15, 28) * 40); // digests over ~10-20 min while away
       }
@@ -348,6 +356,10 @@ function simulateAway(secs) {
       let drain = (AWAY.happy + poops.length * AWAY.dirty) * enrich;
       if (s.hunger < 20 || s.thirst < 20) drain += AWAY.happy * 2;
       s.happy = clamp(s.happy - dt * drain, 0, 100);
+      // moods: friends keep each other company, everyone sleeps, a turtle alone gets lonely
+      s.social = clamp(s.social + dt * AWAY.happy * (turtles.length > 1 ? 3 : -lerp(0.5, 2, t.traits.friendly)), 15, 100);
+      s.energy = clamp(s.energy + dt * 0.01, 0, 100);
+      t.chub = clamp(t.chub - dt * 0.000015, 0, 1); // slims down slowly: a berry binge still shows the next morning
       healthStep(t, dt, AWAY);
       s.health = Math.max(s.health, AWAY_FLOOR); // never dies while you're away: at worst comes back sick
       if (s.health > 50 && s.hunger > 40 && s.thirst > 40) t.growth = clamp(t.growth + dt * AWAY.grow * (lamp ? 1.3 : 1), 0, 1);
@@ -362,6 +374,8 @@ function simulateAway(secs) {
     }
   }
   turtles.forEach(t => t.mud = Math.max(0, (t.mud || 0) - secs / 900));
+  const chilly = darkness() > 0.5 && !lamp && !objOf('hut'); // a cold night with nowhere warm
+  turtles.forEach(t => t.st.warm = chilly ? Math.min(t.st.warm, 45) : 100);
   turtles.forEach(t => t.S = sizeFor(t.growth));
   return { secs, rep, dryAt, fed, cleaned, grown };
 }
@@ -381,7 +395,8 @@ function showAway(report) {
     if (s.health < SICK) now.push('🤒 <b>sick</b>');
     if (s.hunger < 30) now.push('🥬 very hungry');
     if (s.thirst < 30) now.push('💧 thirsty');
-    if (s.happy < 30) now.push('😢 lonely');
+    if (s.happy < 30) now.push('😢 sad');
+    if (s.social < MOOD.lonely) now.push('🤗 lonely');
     if (!now.length) now.push('😊 doing great');
     lines.push(`<div class="who">🐢 ${t.name}</div><div>${bits.length ? bits.join(', ') + '.' : 'Mostly napped.'}</div><div>Now: ${now.join(' · ')}</div>`);
   }
@@ -442,6 +457,10 @@ function goalFor() {
       if (o.then === 'sleep') T.rest = { kind: 'sleep', t: rand(40, 120) };
       if (o.then === 'roll') { T.rest = { kind: 'roll', t: rand(3, 5) }; T.mud = 1; st.happy = clamp(st.happy + 8, 0, 100); }
       if (o.then === 'mirror') T.rest = { kind: 'mirror', t: rand(5, 9) };
+      if (o.then === 'greet') { // say hi to a friend
+        const f = o.friend;
+        if (f && dist(f, T) < (f.S + S) * 1.8) { st.social = clamp(st.social + 12, 0, 100); f.st.social = clamp(f.st.social + 6, 0, 100); emit(T.x, T.y - S, 'heart', 2); T.a = Math.atan2(f.y - T.y, f.x - T.x); }
+      }
       if (o.then === 'slide') { const sl = objOf('slide'); if (sl) T.sliding = { t: 0, from: { x: T.x, y: sl.y }, to: { x: sl.x - SLIDE.len / 2 - 55, y: sl.y } }; }
     } };
   }
@@ -458,19 +477,24 @@ function pickOuting() {
     if (dist(T, e[1]) < dist(T, e[0])) e.reverse();
     return { route: e, then: 'tunnel' };
   }]);
-  if (hut) opts.push([0.05 + (1 - tr.friendly) * 0.4 + (st.happy < 40 ? 0.3 : 0), () => ({ route: [{ x: hut.x, y: hut.y + HUT.r + 30 }, { x: hut.x, y: hut.y }], then: 'hide' })]);
+  if (hut) opts.push([0.05 + (1 - tr.friendly) * 0.4 + (st.happy < 40 ? 0.3 : 0) + (st.warm < 60 ? 1.5 : 0), () => ({ route: [{ x: hut.x, y: hut.y + HUT.r + 30 }, { x: hut.x, y: hut.y }], then: 'hide' })]);
   if (pond) {
     const spot = () => ({ x: pond.x + rand(-0.55, 0.55) * POND.rx, y: pond.y + rand(-0.45, 0.45) * POND.ry });
     opts.push([0.1 + tr.playful * 0.4, () => ({ route: [spot(), spot(), spot()], then: 'swim' })]);
   }
   const lamp = objOf('lamp'), mud = objOf('mud'), slide = objOf('slide'), mirror = objOf('mirror');
-  if (lamp) opts.push([0.15 + (darkness() > 0.5 ? 0.35 : 0), () => ({ route: [{ x: lamp.x + rand(-50, 50), y: lamp.y + rand(-40, 40) }], then: 'bask' })]);
+  if (lamp) opts.push([0.15 + (darkness() > 0.5 ? 0.35 : 0) + (st.warm < 60 ? 3 : 0), () => ({ route: [{ x: lamp.x + rand(-50, 50), y: lamp.y + rand(-40, 40) }], then: 'bask' })]);
   if (mud) opts.push([0.05 + tr.playful * 0.3 + tr.curious * 0.1, () => ({ route: [{ x: mud.x + rand(-0.4, 0.4) * MUD.rx, y: mud.y + rand(-0.3, 0.3) * MUD.ry }], then: 'roll' })]);
   if (slide) opts.push([0.08 + tr.playful * 0.35 + tr.speed * 0.1, () => {
     const lo = slide.x - SLIDE.len / 2, hi = slide.x + SLIDE.len / 2;
     return { route: [{ x: lo - 30, y: slide.y }, { x: lo + 4, y: slide.y }, { x: hi - 10, y: slide.y }], then: 'slide' };
   }]);
   if (mirror) opts.push([0.05 + tr.curious * 0.35, () => ({ route: [{ x: mirror.x, y: mirror.y + 50 }], then: 'mirror' })]);
+  const others = turtles.filter(o => o !== T && o.releasing === undefined && !o.dying);
+  if (others.length) opts.push([st.social < 40 ? 4 : 0.1 + tr.friendly * 0.3, () => { // go see a friend
+    const f = others.reduce((b, o) => (dist(o, T) < dist(b, T) ? o : b)), d = Math.max(1, dist(f, T)), gap = (f.S + S) * 1.1;
+    return { route: [{ x: clamp(f.x + (T.x - f.x) / d * gap, 40, YW - 40), y: clamp(f.y + (T.y - f.y) / d * gap, 30, YH - 20) }], then: 'greet', friend: f };
+  }]);
   opts.push([0.7, () => ({ route: [{ x: clamp(T.x + rand(-260, 260), 50, YW - 50), y: clamp(T.y + rand(-260, 260), 50, YH - 50) }] })]);
   let r = Math.random() * opts.reduce((a, o) => a + o[0], 0);
   for (const [w, make] of opts) if ((r -= w) <= 0) return make();
@@ -487,7 +511,7 @@ function nudgeBall() {
   let joy = lerp(1, 7, T.traits.playful);
   if (ball.toy === 'bell') { joy *= 1.6; emit(ball.x, ball.y - ball.r, 'note'); }
   if (ball.toy === 'treat' && Math.random() < 0.4) { st.hunger = clamp(st.hunger + 4, 0, 100); emit(ball.x, ball.y, 'crumb', 5); }
-  st.happy = clamp(st.happy + joy, 0, 100);
+  st.happy = clamp(st.happy + joy, 0, 100); T.chub = clamp(T.chub - 0.006, 0, 1); st.energy = clamp(st.energy - 0.5, 0, 100);
   emit(T.x, T.y - S, 'heart');
   if (T.playStarCool <= 0) { earn(1, T.x, T.y - S * 2); T.playStarCool = 4; }
   buzz(8);
@@ -503,7 +527,7 @@ function think(dt) {
     T.a = Math.atan2(sl.to.y - sl.from.y, sl.to.x - sl.from.x); T.v = 140; T.headExt = 1;
     T.tailT += dt * 8;
     if (sl.t >= 1) {
-      T.sliding = null; T.v = 30;
+      T.sliding = null; T.v = 30; T.chub = clamp(T.chub - 0.02, 0, 1); st.energy = clamp(st.energy - 1.5, 0, 100);
       st.happy = clamp(st.happy + 6 + T.traits.playful * 6, 0, 100); emit(T.x, T.y - S, 'heart', 2);
       if (inPond(T)) for (let i = 0; i < 12; i++) emit(T.x, T.y, 'drop');
     }
@@ -522,11 +546,17 @@ function think(dt) {
     if (T.eat.t > lerp(1.5, 0.75, T.traits.appetite)) { // big appetites chomp faster
       if (T.eat.f.bites === 1) earn(1, T.eat.f.x, T.eat.f.y - 10);
       const f = T.eat.f; f.bites--; T.eat.t = 0;
+      const want = craving(T);
+      if (st.hunger > 90) T.chub = clamp(T.chub + 0.02, 0, 1); // eating when already full
       st.hunger = clamp(st.hunger + (f.type === 'berry' ? 9 : 12), 0, 100);
-      st.happy = clamp(st.happy + (f.type === 'berry' ? 5 : 2), 0, 100);
+      st.happy = clamp(st.happy + (want === f.type ? 10 : want ? -1 : f.type === 'berry' ? 5 : 2), 0, 100); // bored of the same old food
+      if (want === f.type && f.bites === 1) emit(T.x, T.y - S, 'heart', 2);
       emit(f.x, f.y, 'crumb', 6); buzz(5);
       grow((f.type === 'berry' ? 0.004 : 0.003) * (0.5 + st.happy / 100));
-      if (f.bites <= 0) { foods = foods.filter(x => x !== f); T.eat = null; T.gut.push(rand(15, 28)); if (f.slot !== undefined && plots[f.slot]) plots[f.slot].t0 = Date.now(); }
+      if (f.bites <= 0) {
+        T.diet.push(f.type); if (T.diet.length > 6) T.diet.shift();
+        if (f.type === 'berry') T.chub = clamp(T.chub + 0.05, 0, 1);
+        foods = foods.filter(x => x !== f); T.eat = null; T.gut.push(rand(15, 28)); if (f.slot !== undefined && plots[f.slot]) plots[f.slot].t0 = Date.now(); }
     }
     if (T.eat && !foods.includes(T.eat.f)) T.eat = null;
   } else if (T.drinkT > 0) {
@@ -552,9 +582,12 @@ function think(dt) {
       T.a += angDiff(T.a, -Math.PI / 2) * Math.min(1, dt * 4);
       if (Math.random() < dt * 0.7) emit(T.x, T.y - S, T.traits.friendly < 0.35 ? 'grr' : 'heart');
     }
-    if (T.rest.t <= 0 || T.userTarget || (foods.length && st.hunger < 60) || st.thirst < 35 || (kind === 'sleep' && darkness() < 0.3)) T.rest = null;
+    if (T.rest.t <= 0 || T.userTarget || (foods.length && st.hunger < 60) || st.thirst < 35 || (kind === 'sleep' && darkness() < 0.3 && st.energy > 90)) {
+      if (kind === 'sleep' && T.rest.t <= 0 && st.energy < 60 && !T.userTarget && st.thirst >= 35 && !(foods.length && st.hunger < 60)) T.rest.t = rand(20, 40); // still sleepy: keep dozing
+      else T.rest = null;
+    }
   } else {
-    T.headExt = lerp(T.headExt, 1, dt * 4);
+    T.headExt = lerp(T.headExt, st.energy < MOOD.tired ? 0.7 : st.social < MOOD.lonely ? 0.8 : st.warm < MOOD.cold ? 0.6 : 1, dt * 4); // droopy when tired, lonely or cold
     const g = goalFor();
     if (g) {
       const from = g.by === 'mouth' ? mouth() : T;
@@ -572,7 +605,7 @@ function think(dt) {
     } else {
       T.idleT -= dt;
       if (T.idleT <= 0) {
-        if (darkness() > 0.6 && st.hunger > 35 && st.thirst > 35 && Math.random() < 0.85) { // bedtime
+        if ((darkness() > 0.6 || st.energy < 35) && st.hunger > 35 && st.thirst > 35 && Math.random() < 0.85) { // bedtime, or a nap
           const hut = objOf('hut');
           if (hut && Math.random() < 0.6) T.outing = { route: [{ x: hut.x, y: hut.y + HUT.r + 30 }, { x: hut.x + rand(-15, 15), y: hut.y + rand(-10, 10) }], then: 'sleep' };
           else T.rest = { kind: 'sleep', t: rand(40, 120) };
@@ -583,6 +616,9 @@ function think(dt) {
   }
 
   want *= lerp(0.7, 1.35, T.traits.speed);
+  if (st.energy < 30) want *= lerp(0.55, 1, st.energy / 30);
+  if (st.warm < MOOD.cold) want *= 0.6;
+  if (T.chub > MOOD.chubby) want *= lerp(1, 0.7, (T.chub - MOOD.chubby) / (1 - MOOD.chubby));
   T.swim = inPond(T);
   if (T.swim && T.mud > 0) { T.mud = 0; for (let i = 0; i < 8; i++) emit(T.x, T.y, 'drop'); } // a dip rinses the mud off
   if (T.swim) { want *= 0.8; st.happy = clamp(st.happy + dt * (0.2 + T.traits.playful * 0.5), 0, 100); if (T.v > 5 && Math.random() < dt * 3) emit(toWorld(-0.9, 0).x, toWorld(-0.9, 0).y, 'ripple'); }
@@ -611,8 +647,11 @@ function think(dt) {
 
   // blink + tail
   T.blinkT -= dt;
-  if (T.blinkT <= 0) { T.blink = 0.15; T.blinkT = rand(2, 5); }
+  const tired = st.energy < MOOD.tired;
+  if (T.blinkT <= 0) { T.blink = tired ? 0.45 : 0.15; T.blinkT = tired ? rand(0.8, 2) : rand(2, 5); } // heavy eyelids
   T.blink = Math.max(0, T.blink - dt);
+  T.yawn = Math.max(0, (T.yawn || 0) - dt);
+  if (tired && !T.rest && !T.eat && Math.random() < dt * 0.1) T.yawn = 1.4;
   T.tailT += dt * (2 + T.v * 0.12);
 }
 
@@ -626,7 +665,8 @@ function updateFeet(dt) {
   const stepDur = clamp(0.32 - T.v * 0.003, 0.18, 0.32);
   const lead = 0.28;
   const fwd = { x: Math.cos(T.a) * T.v * lead, y: Math.sin(T.a) * T.v * lead };
-  const targets = LEGS.map(l => { const p = toWorld(l.rx, l.ry); return { x: p.x + fwd.x, y: p.y + fwd.y }; });
+  const wide = 1 + 0.25 * T.chub;
+  const targets = LEGS.map(l => { const p = toWorld(l.rx, l.ry * wide); return { x: p.x + fwd.x, y: p.y + fwd.y }; });
   let anyStepping = false;
   T.feet.forEach((f, i) => {
     if (f.t < 1) {
@@ -691,8 +731,42 @@ function updateBall(dt) {
 const makeBall = (x, y) => ({ x, y, vx: 0, vy: 0, r: TOYS[up.toy].r, spin: 0, idle: 0, toy: up.toy });
 
 // ---------- stats ----------
+// ---------- hidden moods: no bars, you read them off the turtle (and the ⋯ menu) ----------
+const MOOD = { lonely: 30, tired: 25, cold: 35, chubby: 0.45 };
+const inHut = t => { const h = objOf('hut'); return !!h && dist(t, h) < HUT.r; };
+const friendNear = (t, k) => turtles.some(o => o !== t && o.releasing === undefined && dist(o, t) < (o.S + t.S) * k);
+function craving(t) { // ate the same thing 4 times running: now wants the other one
+  const d = t.diet, last = d[d.length - 1];
+  return d.length >= 4 && d.slice(-4).every(x => x === last) ? (last === 'berry' ? 'lettuce' : 'berry') : null;
+}
+function moods(t) {
+  const s = t.st, m = [], c = craving(t);
+  if (s.social < MOOD.lonely) m.push('🤗 Lonely');
+  if (s.energy < MOOD.tired) m.push('💤 Sleepy');
+  if (s.warm < MOOD.cold) m.push('🥶 Chilly');
+  if (c) m.push(c === 'berry' ? '🍓 Wants berries' : '🥗 Wants greens');
+  if (t.chub > MOOD.chubby) m.push(t.chub > 0.75 ? '🐷 Very chubby' : '🍩 A bit chubby');
+  return m.length ? m.join(' · ') : '😊 Feeling good';
+}
+function wakeUp(t) { // nobody likes being woken up
+  if (t.rest?.kind !== 'sleep') { t.rest = null; return false; }
+  t.rest = null; t.st.happy = clamp(t.st.happy - 6, 0, 100);
+  emit(t.x, t.y - t.S, 'grr'); say(`😾 ${t.name} was napping and woke up grumpy`); buzz([10, 30, 10]);
+  return true;
+}
+
 function updateStats(dt) {
-  const warm = nearLamp(T), asleep = T.rest?.kind === 'sleep';
+  const warm = nearLamp(T), asleep = T.rest?.kind === 'sleep', dk = darkness(), hutIn = inHut(T), cuddle = asleep && friendNear(T, 1.4);
+  // loneliness: friendly turtles need company more; cured by petting, bumping into friends, sleeping in a pile
+  st.social = clamp(st.social + dt * (cuddle ? 0.6 : T.rest?.kind === 'mirror' ? 0.4 : -0.05 * lerp(0.3, 1.6, T.traits.friendly)), 0, 100);
+  // energy: drains while awake, back with sleep (best in the hut, worse under the lamp)
+  st.energy = clamp(st.energy + dt * (asleep ? (hutIn ? 1 : 0.6) * (warm ? 0.5 : 1) : T.rest?.kind === 'bask' ? 0.1 : -0.03 * lerp(0.8, 1.25, T.traits.playful)), 0, 100);
+  if (st.energy <= 2 && !asleep && !T.eat && T.drinkT <= 0 && !T.userTarget && !T.sliding) { T.rest = { kind: 'sleep', t: 30 }; T.outing = null; } // dozes off right where it is
+  // warmth: nights are chilly away from the lamp, the hut or a sleeping buddy
+  const cold = dk > 0.5 && !warm && !hutIn && !cuddle;
+  st.warm = clamp(st.warm + dt * (warm ? 0.8 : hutIn || cuddle ? 0.3 : cold ? -(T.swim ? 0.12 : 0.05) * dk : T.rest?.kind === 'bask' ? 0.5 : 0.15), 0, 100);
+  // weight: berries and overeating add (see think), exercise and time take it off
+  T.chub = clamp(T.chub - dt * (0.00005 + (T.v > 20 ? 0.0003 : 0) + (T.swim ? 0.0015 : 0)), 0, 1);
   st.hunger = clamp(st.hunger - dt * 0.12 * lerp(0.75, 1.35, T.traits.appetite) * (warm ? 0.7 : 1) * (asleep ? 0.6 : 1), 0, 100);
   if (warm) st.happy = clamp(st.happy + dt * 0.15, 0, 100);
   if (T.mud > 0) { T.mud = Math.max(0, T.mud - dt / 900); if (T.mud < 0.75) st.happy = clamp(st.happy - dt * 0.04, 0, 100); } // dried mud itches
@@ -700,6 +774,10 @@ function updateStats(dt) {
   let drain = (0.05 + poops.length * 0.04) * lerp(0.8, 1.25, T.traits.playful); // playful ones get bored faster
   if (st.hunger < 30) drain += 0.12;
   if (st.thirst < 30) drain += 0.12;
+  if (st.social < MOOD.lonely) drain += 0.05;
+  if (st.energy < MOOD.tired) drain += 0.03;
+  if (st.warm < MOOD.cold) drain += 0.04;
+  if (T.chub > 0.75) drain += 0.02;
   st.happy = clamp(st.happy - dt * drain, 0, 100);
   healthStep(T, dt, graceT > 0 ? GRACE : LIVE);
   if (st.health < 25 && !T.warned && T.dying === undefined) {
@@ -802,19 +880,21 @@ function hex(c, x, y, r, rot = 0) {
 }
 
 function drawTurtle(time) {
-  const c = ctx, g = G(), L = look(g);
+  const c = ctx, g = G(), L = look(g), wide = 1 + 0.25 * T.chub;
+  const shiver = st.warm < MOOD.cold && !T.rest ? Math.sin(time * 55) * Math.max(0.6, S * 0.03) : 0; // cold: little shivers
+  c.save(); c.translate(shiver, 0);
   if (turtles.length > 1 && T === sel && picked) { // selection ring
     c.strokeStyle = '#ffffffb0'; c.lineWidth = 2.5; c.setLineDash([6, 5]); c.lineDashOffset = -time * 12;
     c.beginPath(); c.ellipse(T.x, T.y, S * 1.55, S * 1.45, T.a, 0, 7); c.stroke(); c.setLineDash([]);
   }
   // shadow
   c.fillStyle = '#00000030';
-  c.beginPath(); c.ellipse(T.x + S * 0.15, T.y + S * 0.2, S * 1.15, S * 1.0, T.a, 0, 7); c.fill();
+  c.beginPath(); c.ellipse(T.x + S * 0.15, T.y + S * 0.2, S * 1.15, S * 1.0 * wide, T.a, 0, 7); c.fill();
 
   const { skin, skinDark, skinLight } = L;
   // legs
   T.feet.forEach((f, i) => {
-    const Lg = LEGS[i], hip = toWorld(Lg.hx, Lg.hy);
+    const Lg = LEGS[i], hip = toWorld(Lg.hx, Lg.hy * wide);
     const lift = f.t < 1 ? Math.sin(Math.PI * f.t) : 0;
     const w = S * 0.36 * (1 + lift * 0.15);
     c.lineCap = 'round';
@@ -878,7 +958,7 @@ function drawTurtle(time) {
     for (const s of [-1, 1]) { c.beginPath(); c.moveTo(S * 0.05 * hs, s * S * 0.13 * hs); c.quadraticCurveTo(-S * 0.1 * hs, s * S * 0.2 * hs, -S * 0.26 * hs, s * S * 0.12 * hs); c.stroke(); }
     c.beginPath(); c.moveTo(S * 0.3 * hs, 0); c.lineTo(-S * 0.2 * hs, 0); c.stroke();
   }
-  const open = T.eat ? Math.max(0, Math.sin(T.eat.t * 14)) : 0;
+  const open = T.eat ? Math.max(0, Math.sin(T.eat.t * 14)) : T.yawn > 0 ? Math.sin(Math.PI * T.yawn / 1.4) * 1.6 : 0;
   if (open > 0.1) { c.fillStyle = '#5a2a2a'; c.beginPath(); c.ellipse(S * 0.4 * hs, 0, S * 0.08 * hs * open + 1, S * 0.12 * hs, 0, 0, 7); c.fill(); }
   c.fillStyle = skinDark; c.beginPath(); c.arc(S * 0.4 * hs, -S * 0.05 * hs, 1.2, 0, 7); c.arc(S * 0.4 * hs, S * 0.05 * hs, 1.2, 0, 7); c.fill();
   const happyEyes = T.petT > 0 && T.petT < 0.5;
@@ -899,7 +979,7 @@ function drawTurtle(time) {
 
   // shell
   const ar = L.aspect, k = ar / 0.84;
-  c.save(); c.translate(T.x, T.y); c.rotate(T.a);
+  c.save(); c.translate(T.x, T.y); c.rotate(T.a); c.scale(1, wide);
   const sg = c.createRadialGradient(-S * 0.2, -S * 0.25, S * 0.1, 0, 0, S * 1.1);
   sg.addColorStop(0, L.shellHi); sg.addColorStop(0.7, L.shellMid); sg.addColorStop(1, L.shellLo);
   c.fillStyle = L.rim; c.beginPath(); c.ellipse(0, 0, S + 2.5, S * ar + 2.5, 0, 0, 7); c.fill();
@@ -956,6 +1036,7 @@ function drawTurtle(time) {
   }
   c.restore();
 
+  c.restore(); // shiver
   // name tag when there's more than one turtle
   if (turtles.length > 1 && T === sel && picked) {
     const ty = T.y + S * 1.45 + 10, lab = textSprite(T.name, 'bold 12px system-ui', '#2c4020'), tw = lab.w + 12;
@@ -963,7 +1044,9 @@ function drawTurtle(time) {
     drawText(c, lab, T.x, ty + 0.5);
   }
   // need bubble
-  const need = st.health < SICK ? '🤒' : st.hunger < 30 ? '🥬' : st.thirst < 30 ? '💧' : poops.length >= 3 ? '🧹' : st.happy < 25 ? '🎾' : T.mud > 0 && T.mud < 0.75 ? '🛁' : null;
+  const crave = st.hunger < 85 && craving(T);
+  const need = st.health < SICK ? '🤒' : st.hunger < 30 ? '🥬' : st.thirst < 30 ? '💧' : poops.length >= 3 ? '🧹' : st.warm < MOOD.cold ? '🥶' : st.energy < MOOD.tired ? '💤'
+    : st.social < MOOD.lonely ? '🤗' : crave ? (crave === 'berry' ? '🍓' : '🥗') : st.happy < 25 ? '🎾' : T.mud > 0 && T.mud < 0.75 ? '🛁' : null;
   if (need && !T.eat && T.drinkT <= 0 && T.rest?.kind !== 'sleep') {
     const bx = T.x + S * 0.9 + 6, by = T.y - S * 1.5 - 8 + Math.sin(time * 3) * 3;
     c.fillStyle = '#fffe'; c.beginPath(); c.arc(bx, by, 17, 0, 7); c.fill();
@@ -1506,10 +1589,15 @@ document.querySelectorAll('#tools button').forEach(b => b.addEventListener('clic
     say('Fresh water!');
     return;
   }
+  if (b.dataset.mode === 'food' && mode === 'food') { // tap Feed again: lettuce <-> berries
+    foodType = foodType === 'lettuce' ? 'berry' : 'lettuce';
+    b.innerHTML = foodType === 'berry' ? '🍓<span>Berry</span>' : '🥬<span>Feed</span>';
+    return say(foodType === 'berry' ? 'Berries 🍓 sweet treats, but too many make a chubby turtle' : 'Lettuce 🥬 healthy everyday food', 2600);
+  }
   mode = b.dataset.mode;
   placing = null; endArrange();
   document.querySelectorAll('#tools button').forEach(x => x.classList.toggle('on', x === b));
-  say({ walk: turtles.length > 1 ? (isPicked() ? `Tap to call ${sel.name} · tap ${sel.name} again to deselect` : 'Tap a turtle to pick it') : 'Tap to call your turtle · tap him to pet', food: 'Tap to drop food', clean: 'Tap the messes to scoop them', play: 'Tap to toss the ball · flick it' }[mode]);
+  say({ walk: turtles.length > 1 ? (isPicked() ? `Tap to call ${sel.name} · tap ${sel.name} again to deselect` : 'Tap a turtle to pick it') : 'Tap to call your turtle · tap him to pet', food: `Tap to drop ${foodType === 'berry' ? 'berries' : 'lettuce'} · tap Feed again to switch`, clean: 'Tap the messes to scoop them', play: 'Tap to toss the ball · flick it' }[mode]);
   if (mode === 'play' && !ball) ball = makeBall(cam.x, cam.y);
   renderToybar();
 }));
@@ -1655,10 +1743,10 @@ function tap(p) {
   if (hitT && hitT === sel && picked && turtles.length > 1) return deselect(); // tap the picked turtle again to let go
   if (hitT) return pet(hitT);
   if (mode === 'walk' && !isPicked()) say('Tap a turtle to pick it, then tap to call it');
-  else if (mode === 'walk') { sel.userTarget = { x: p.x, y: p.y }; sel.eat = null; sel.drinkT = 0; sel.rest = null; sel.outing = null; }
+  else if (mode === 'walk') { wakeUp(sel); sel.userTarget = { x: p.x, y: p.y }; sel.eat = null; sel.drinkT = 0; sel.outing = null; }
   else if (mode === 'food') {
     if (foods.filter(f => f.slot === undefined).length >= 6) return say('That\'s plenty of food!');
-    const type = foodToggle++ % 3 === 2 ? 'berry' : 'lettuce';
+    const type = foodType;
     const bites = type === 'berry' ? 2 : 3;
     const f = { x: p.x, y: p.y, type, bites, max: bites, rot: rand(0, 6) }; keepInYard(f); foods.push(f);
     buzz(8);
@@ -1689,16 +1777,16 @@ function deselect() {
 }
 function pet(t) {
   select(t);
-  t.rest = null; // wakes them up
+  if (wakeUp(t)) return;
   if (t.petCool > 0) return;
   const f = t.traits.friendly;
   t.petT = lerp(1.9, 0.9, f); t.petCool = 1.2; t.v *= 0.2; // grumpy turtles hide in their shell longer
   if (f < 0.35 && Math.random() < 0.6) { // not in the mood
-    t.st.happy = clamp(t.st.happy + 1, 0, 100);
+    t.st.happy = clamp(t.st.happy + 1, 0, 100); t.st.social = clamp(t.st.social + 5, 0, 100);
     setTimeout(() => emit(t.x, t.y - t.S, 'grr'), t.petT * 500);
     buzz([10, 30, 10]);
   } else {
-    t.st.happy = clamp(t.st.happy + lerp(3, 9, f), 0, 100);
+    t.st.happy = clamp(t.st.happy + lerp(3, 9, f), 0, 100); t.st.social = clamp(t.st.social + lerp(10, 25, f), 0, 100);
     if (t.starCool <= 0) { earn(1, t.x, t.y - t.S * 2.2); t.starCool = 8; }
     setTimeout(() => emit(t.x, t.y - t.S, 'heart', 1 + Math.round(f * 3)), t.petT * 500);
     buzz(20);
@@ -1728,6 +1816,7 @@ stageEl.addEventListener('click', () => {
   if (!isPicked()) return say('Tap a turtle to pick it');
   menu.querySelector('.title').textContent = `🐢 ${sel.name}`;
   menu.querySelector('.persona').textContent = personality(sel.traits);
+  menu.querySelector('.mood').textContent = moods(sel);
   menu.querySelector('.traits').innerHTML = TRAITS.map(d => {
     const n = dots(sel.traits[d.k]);
     return `<div>${d.icon} ${d.label}</div><div class="dots">${'●'.repeat(n)}<span>${'●'.repeat(5 - n)}</span></div>`;
@@ -1844,12 +1933,30 @@ function separate() {
     if (d < m && d > 0.01) {
       const push = (m - d) / 2, nx = (b.x - a.x) / d, ny = (b.y - a.y) / d;
       a.x -= nx * push; a.y -= ny * push; b.x += nx * push; b.y += ny * push;
+      for (const t of [a, b]) if (!(t.bumpCool > performance.now())) { // a friendly bump
+        t.bumpCool = performance.now() + 1500;
+        if (t.st.social < 60) emit(t.x, t.y - t.S, 'heart');
+        t.st.social = clamp(t.st.social + 8, 0, 100);
+      }
     }
   }
 }
 
 let last = performance.now();
+// Slow device? Draw fewer pixels. Every 2 seconds, if most frames missed ~40fps, step the canvas resolution down (never below 1×).
+const perf = { n: 0, slow: 0, sum: 0, fps: 0 };
+function adaptRes(gap) {
+  if (gap > 150) return; // app was paused or a one-off hitch
+  perf.n++; perf.sum += gap; if (gap > 25) perf.slow++;
+  if (perf.sum < 2000) return;
+  perf.fps = Math.round(1000 * perf.n / perf.sum);
+  if (perf.slow > perf.n * 0.6 && DPR > 1) { dprCap = Math.max(1, DPR - 0.5); resize(); }
+  perf.n = perf.slow = perf.sum = 0;
+}
+window.__perf = perf;
+
 function frame(now) {
+  adaptRes(now - last);
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   const time = now / 1000;
   graceT -= dt; waterStarCool -= dt;
