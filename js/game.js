@@ -122,19 +122,23 @@ const sizeK = kind => SIZES[kind]?.[up.size[kind] || 0]?.k || 1;
 const GROW_MS = { lettuce: 20 * 60e3, berry: 40 * 60e3 }; // garden growing time (real time)
 let plots = [];   // garden slots: { t0 (planted, ms) }
 let crabs = [];   // clean-up crabs (not saved: they just scuttle back in)
+let ground = {};  // painted tiles: "col,row" -> ground type (unpainted = sand)
+const TILE = 40;
+const tileKey = p => `${Math.floor(p.x / TILE)},${Math.floor(p.y / TILE)}`;
+const inWater = p => ground[tileKey(p)] === 'water';
 let flies = [];   // fireflies at night
 let arranging = false, hourOverride = null;
 const POND = { rx: 120, ry: 78 }, LOG = { len: 150, r: 40 }, HUT = { r: 54 }, FEEDER_R = 26;
-let up = { yard: 0, bowl: 0, feeder: 0, toys: ['ball'], toy: 'ball', crab: 0, vet: 0, garden: 0, size: {}, birds: 0, lily: 0, bugs: 0 };
+let up = { yard: 0, bowl: 0, feeder: 0, toys: ['ball'], toy: 'ball', crab: 0, vet: 0, garden: 0, size: {}, birds: 0, lily: 0, bugs: 0, brushes: ['sand'] };
 const UP0 = JSON.parse(JSON.stringify(up)); // a brand-new yard's upgrades
-const SHARED_UP = ['toys', 'toy', 'vet']; // owned once, used in every yard
+const SHARED_UP = ['toys', 'toy', 'vet', 'brushes']; // owned once, used in every yard
 let objs = []; // placed things: { kind: 'feeder' | 'rock' | 'log' | 'hut' | 'pond', x, y }
 let stars = 0, lastDaily = '', base = null, feederT = 0, waterStarCool = 0;
 let YW = 400, YH = 600;
 const cam = { x: 200, y: 300, z: 1 };
 let placing = null; // object waiting for a tap to be put down
 const objOf = kind => objs.find(o => o.kind === kind);
-const inPond = p => { const o = objOf('pond'); return !!o && ((p.x - o.x) / POND.rx) ** 2 + ((p.y - o.y) / POND.ry) ** 2 < 1; };
+const inPond = p => { const o = objOf('pond'); return (!!o && ((p.x - o.x) / POND.rx) ** 2 + ((p.y - o.y) / POND.ry) ** 2 < 1) || inWater(p); }; // painted water counts as pond
 const structCount = () => objs.filter(o => STRUCTS[o.kind] || ROCKS[o.kind]).length;
 
 // Growth: 0 = fresh hatchling, 1 = full-grown. Size (half shell length) scales with it.
@@ -223,6 +227,7 @@ function makeTurtle(o = {}) {
     ...o,
   };
   if (!t.name) t.name = randomName();
+  if (!t.morph) t.morph = {}; // rare colours/features (only new hatchlings roll them: see rollMorph)
   if (!t.born) t.born = Date.now() - (t.growth || 0) * GROW_DAYS * 86400e3; // hatch time; older saves: guessed from how grown it is
   if (!t.tint) t.tint = o.hue ? { shell: clamp(o.hue * 0.5, -28, 28), skin: clamp(o.hue * 0.3, -18, 18), light: rand(-0.12, 0.12) } : randomTint();
   t.st = { hunger: 80, thirst: 80, happy: 70, health: 100, social: 80, energy: 85, warm: 90, ...(o.st || {}) }; // last three are hidden moods
@@ -256,7 +261,7 @@ function resize() {
   cv.width = W * DPR; cv.height = H * DPR;
   // the HUD grows with the phone's status bar / camera cutout, so measure it instead of guessing
   TOP = Math.round(document.getElementById('stage').getBoundingClientRect().bottom + 6);
-  BOTTOM = Math.round(H - document.getElementById('tools').getBoundingClientRect().top + 6);
+  measureBottom();
   makeSand();
   if (base) applyYard();
 }
@@ -279,25 +284,31 @@ const keepInYard = p => { // placed things keep their whole body inside the fenc
 };
 const viewH = () => H - TOP - BOTTOM;
 const vcx = () => W / 2, vcy = () => TOP + viewH() / 2; // screen point the camera centers on
-const zMin = () => Math.min(1, W / YW, viewH() / YH);   // zoomed all the way out = whole yard fits
-const Z_MAX = 2.5;
+const zMin = () => Math.min(W / YW, viewH() / YH);   // zoomed all the way out = whole yard fits (can be >1 on big screens)
+// Every device gets the same yard; bigger screens just zoom in further.
+const STD_BASE = { w: 375, h: 677 };
+const zMax = () => 2.5 * Math.max(1, Math.min(W / STD_BASE.w, viewH() / STD_BASE.h));
+function measureBottom() { // the visible yard ends at the toolbar, or at the paint palette while painting
+  const el = painting ? paintbar : document.getElementById('tools');
+  BOTTOM = Math.round(H - el.getBoundingClientRect().top + 6);
+}
 // Opening a turtle's stats glides the camera over and zooms in, framing it in the space above the card.
 // It keeps following while the card is open; closing the card leaves the view where it is.
 let camFollow = null;
-function focusTurtle(t, glide) { camFollow = { t, z: clamp(55 / t.S, 1.3, Z_MAX), until: glide ? performance.now() + 1500 : 0 }; }
+function focusTurtle(t, glide) { const ds = zMax() / 2.5; camFollow = { t, z: clamp(55 / t.S * ds, 1.3 * ds, zMax()), until: glide ? performance.now() + 1500 : 0 }; }
 function followCam(dt) {
   if (!camFollow) return;
   if (!turtles.includes(camFollow.t) || (camFollow.until ? performance.now() > camFollow.until : menu.hidden)) { camFollow = null; return; }
   const card = menu.hidden ? null : menu.querySelector('.card').getBoundingClientRect();
   const sy = card ? TOP + Math.max(40, (card.top - TOP) / 2) : vcy(); // middle of the space above the card, or the view
   const k = Math.min(1, dt * 4), t = camFollow.t;
-  cam.z = lerp(cam.z, clamp(camFollow.z, zMin(), Z_MAX), k);
+  cam.z = lerp(cam.z, clamp(camFollow.z, zMin(), zMax()), k);
   cam.x = lerp(cam.x, t.x, k);
   cam.y = lerp(cam.y, t.y - (sy - vcy()) / cam.z, k);
   clampCam();
 }
 function clampCam() {
-  cam.z = clamp(cam.z, zMin(), Z_MAX);
+  cam.z = clamp(cam.z, zMin(), zMax());
   const hw = W / 2 / cam.z, hh = viewH() / 2 / cam.z;
   cam.x = YW <= hw * 2 ? YW / 2 : clamp(cam.x, hw, YW - hw);
   cam.y = YH <= hh * 2 ? YH / 2 : clamp(cam.y, hh, YH - hh);
@@ -364,6 +375,7 @@ function drawYard(v) {
   c.fillStyle = '#ffffff40'; c.fill(shine);
   c.lineWidth = 2; c.lineCap = 'round';
   grass.forEach((G, i) => { c.strokeStyle = GRASS[i]; c.stroke(G); });
+  drawGround(v);
   // wooden fence
   c.strokeStyle = '#6b4a2a'; c.lineWidth = 7; c.strokeRect(-4, -4, YW + 8, YH + 8);
   c.strokeStyle = '#9a6e40'; c.lineWidth = 3; c.strokeRect(-4, -4, YW + 8, YH + 8);
@@ -376,7 +388,7 @@ function drawYard(v) {
 // v3 keeps several yards. The yard on screen lives in the usual globals; the others are stored packed.
 // Older saves (v2, v1) are read once and become "My Yard"; the v2 save is left untouched as a backup.
 const SAVE3 = 'turtle-save-v3', SAVE = 'turtle-save-v2', OLD_SAVE = 'turtle-save-v1';
-const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud', 'chub', 'diet', 'born', 'arrived'];
+const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud', 'chub', 'diet', 'born', 'arrived', 'morph'];
 let yards = [null], yardIdx = 0, yardName = 'My Yard';
 const packTurtle = t => Object.fromEntries(KEEP.map(k => [k, t[k]]));
 function packYard() {
@@ -386,7 +398,7 @@ function packYard() {
     poops, level: bowl.level,
     foods: foods.map(({ x, y, type, bites, max, rot, fromFeeder, slot }) => ({ x, y, type, bites, max, rot, fromFeeder, slot })),
     up: Object.fromEntries(Object.entries(up).filter(([k]) => !SHARED_UP.includes(k))),
-    objs: objs.map(({ kind, type, seed, x, y }) => ({ kind, type, seed, x, y })), plots,
+    objs: objs.map(({ kind, type, seed, x, y }) => ({ kind, type, seed, x, y })), plots, ground,
     bowlPos: { x: bowl.x, y: bowl.y }, cam: { x: cam.x, y: cam.y, z: cam.z },
   };
 }
@@ -399,8 +411,29 @@ function setYardState(y) { // put a packed yard into the globals (no layout yet:
   up = { ...JSON.parse(JSON.stringify(UP0)), ...(y.up || {}), ...shared }; up.size = { ...(up.size || {}) };
   objs = (y.objs || []).map(o => (o.kind === 'tree' ? { kind: 'deco', type: 'tree', seed: o.seed ?? Math.random(), x: o.x, y: o.y } : o));
   plots = y.plots || [];
+  ground = y.ground || {}; groundChanged();
   if (y.bowlPos) Object.assign(bowl, y.bowlPos); else if (base) { bowl.x = base.w - 60; bowl.y = 58; }
   if (y.cam) Object.assign(cam, y.cam);
+}
+// Older saves sized the yard to the screen they started on. Scale everything to the standard size once,
+// keeping each thing in the same relative spot.
+function rescaleToStandard() {
+  if (!base || (base.w === STD_BASE.w && base.h === STD_BASE.h)) return;
+  const sx = STD_BASE.w / base.w, sy = STD_BASE.h / base.h, P = p => { if (p && typeof p.x === 'number') { p.x *= sx; p.y *= sy; } };
+  yards[yardIdx] = packYard();
+  for (const y of yards) {
+    if (!y) continue;
+    for (const list of [y.turtles, y.objs, y.poops, y.foods]) (list || []).forEach(P);
+    P(y.bowlPos); P(y.cam);
+    if (y.ground) { // move painted tiles to where their centre lands now
+      const g2 = {};
+      for (const [k, t] of Object.entries(y.ground)) { const [c, r] = k.split(',').map(Number); g2[`${Math.floor((c + 0.5) * TILE * sx / TILE)},${Math.floor((r + 0.5) * TILE * sy / TILE)}`] = t; }
+      y.ground = g2;
+    }
+  }
+  loot.treasures.forEach(P); P(loot.gift);
+  base = { ...STD_BASE };
+  setYardState(yards[yardIdx]);
 }
 function save() {
   yards[yardIdx] = packYard();
@@ -432,7 +465,7 @@ function load() {
       if (o) d = { turtles: [{ name: 'Shelly', st: o.st, x: o.x, y: o.y, a: o.a, gut: o.gut, growth: o.growth ?? 0.12 }], sel: 0, poops: o.poops, level: o.level, t: o.t };
     } catch { }
   }
-  if (!d || !d.turtles?.length) { turtles = [makeTurtle()]; sel = turtles[0]; stars = 15; return { away: 0, fresh: true }; }
+  if (!d || !d.turtles?.length) { turtles = [makeTurtle({ morph: rollMorph() })]; sel = turtles[0]; stars = 15; return { away: 0, fresh: true }; }
   poops = d.poops || []; bowl.level = d.level ?? 1; foods = d.foods || [];
   turtles = d.turtles.map(o => makeTurtle({ ...o, gut: o.gut || [] }));
   sel = turtles[d.sel] || turtles[0];
@@ -486,7 +519,7 @@ function simulateAway(secs) {
       if (t.arrived && simNow < t.arrived) continue; // moved here later: this part of the gap wasn't theirs
       s.hunger = clamp(s.hunger - dt * AWAY.hunger * lerp(0.85, 1.2, t.traits.appetite) * (lamp ? 0.9 : 1), 0, 100);
       s.thirst = clamp(s.thirst - dt * AWAY.thirst, 0, 100);
-      if (s.thirst < 55 && pond) { s.thirst = 100; r.drank++; r.pond = true; } // all-you-can-drink pond
+      if (s.thirst < 55 && (pond || waterTiles.length)) { s.thirst = 100; r.drank++; r.pond = true; } // all-you-can-drink pond
       else if (s.thirst < 55 && bowl.level > 0.01) { // wander over for a drink
         const sip = Math.min(bowl.level, 0.12 / B.cap);
         bowl.level -= sip; s.thirst = clamp(s.thirst + sip * B.cap * 333, 0, 100); r.drank++;
@@ -589,7 +622,9 @@ function goalFor() {
     return { p: f, reach: 12, by: 'mouth', arrive: () => { T.eat = { f, t: 0 }; f.eater = T; } };
   }
   if (st.thirst < 65) {
-    const pond = objOf('pond');
+    const pond = objOf('pond'), w = nearestWater(T);
+    if (w && (bowl.level <= 0.08 || dist(T, w) < dist(T, bowl)) && (!pond || dist(T, w) < dist(T, pond) - POND.rx)) // painted water is closest
+      return { p: w, reach: TILE * 0.5 + 4, bodyReach: TILE * 0.5 + S * 0.9 + 6, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = 'water'; } }; // reaching the edge is enough
     if (pond && (bowl.level <= 0.08 || dist(T, pond) - POND.rx < dist(T, bowl))) { // drink at the near edge of the pond
       const a = Math.atan2(T.y - pond.y, T.x - pond.x);
       const p = { x: pond.x + Math.cos(a) * POND.rx * 0.8, y: pond.y + Math.sin(a) * POND.ry * 0.8 };
@@ -655,6 +690,11 @@ function pickOuting() {
   if (hut) opts.push([0.05 + (1 - tr.friendly) * 0.4 + (st.happy < 40 ? 0.3 : 0) + (st.warm < 60 ? 1.5 : 0), () => ({ route: [{ x: hut.x, y: hut.y + HUT.r + 30 }, { x: hut.x, y: hut.y }], then: 'hide' })]);
   if (pond) {
     const spot = () => ({ x: pond.x + rand(-0.55, 0.55) * POND.rx, y: pond.y + rand(-0.45, 0.45) * POND.ry });
+    opts.push([0.1 + tr.playful * 0.4, () => ({ route: [spot(), spot(), spot()], then: 'swim' })]);
+  }
+  if (waterTiles.length >= 4) { // a swim in your own painted water
+    const near = waterTiles.filter(w => dist(w, T) < 500), pool = near.length >= 3 ? near : waterTiles;
+    const spot = () => { const w = pool[Math.floor(Math.random() * pool.length)]; return { x: w.x + rand(-10, 10), y: w.y + rand(-10, 10) }; };
     opts.push([0.1 + tr.playful * 0.4, () => ({ route: [spot(), spot(), spot()], then: 'swim' })]);
   }
   const lamp = objOf('lamp'), mud = objOf('mud'), slide = objOf('slide'), mirror = objOf('mirror');
@@ -738,7 +778,7 @@ function think(dt) {
     if (T.eat && !foods.includes(T.eat.f)) T.eat = null;
   } else if (T.drinkT > 0) {
     T.drinkT -= dt;
-    const fromBowl = T.drinkFrom !== objOf('pond');
+    const fromBowl = T.drinkFrom === bowl;
     T.lookAt = fromBowl ? bowl : null;
     if (fromBowl) T.a += angDiff(T.a, Math.atan2(bowl.y - T.y, bowl.x - T.x)) * Math.min(1, dt * 3); // face the water
     T.headExt = 1 + Math.sin(T.drinkT * 9) * 0.1;
@@ -1085,13 +1125,48 @@ const mix = (a, b, t, hue = 0, grey = 0, light = 0) => {
   return `rgb(${c.map(v => clamp(Math.round(lerp(v, avg, grey)), 0, 255)).join(',')})`;
 };
 const G = () => T.growth;
+// ---------- rare looks: rolled once when a turtle hatches ----------
+const MORPHS = [ // [colour, chance, label, rarity]
+  ['normal', 0.70, '', 0], ['dark', 0.10, 'Dark shell', 1], ['olive', 0.07, 'Olive shell', 1], ['red', 0.05, 'Red shell', 2],
+  ['blue', 0.04, 'Blue-grey shell', 2], ['pale', 0.025, 'Pale', 2], ['albino', 0.01, 'Albino', 3], ['gold', 0.005, 'Golden', 4],
+];
+const RARITY_NAMES = ['Common', 'Uncommon', 'Rare', 'Super rare', 'Legendary'];
+function rollMorph() {
+  let r = Math.random(), color = 'normal';
+  for (const [k, p] of MORPHS) { if ((r -= p) <= 0) { color = k; break; } }
+  const pr = Math.random(), pattern = pr < 0.15 ? 'spots' : pr < 0.25 ? 'stripes' : '';
+  return { color, pattern, spikes: Math.random() < 0.04 };
+}
+function morphInfo(t) { // { label: 'Red shell · spotted · spiky', rarity: 0-4 }
+  const m = t.morph || {}, row = MORPHS.find(x => x[0] === (m.color || 'normal')), bits = [];
+  let rarity = row ? row[3] : 0;
+  if (row && row[2]) bits.push(row[2]);
+  if (m.pattern) { bits.push(m.pattern === 'spots' ? 'spotted' : 'striped'); rarity = Math.max(rarity, 1); }
+  if (m.spikes) { bits.push('spiky'); rarity = Math.max(rarity, 2); }
+  return { label: bits.join(' · '), rarity };
+}
+function announceMorph(t) {
+  const { label, rarity } = morphInfo(t);
+  if (rarity < 2) return;
+  setTimeout(() => { say(`${rarity >= 4 ? '🌟🌟 LEGENDARY!' : rarity >= 3 ? '🌟 WOW, super rare!' : '✨ Rare!'} ${t.name} is ${label.toLowerCase()}!`, 4500); snd.play('fanfare'); emit(t.x, t.y - t.S, 'sparkle', 20); }, 3200);
+}
+const MORPH_SHELL = { // fixed shell palettes for the colours that aren't just a hue shift: [baby, adult] per part
+  red: { hi: ['#ec9a7c', '#9a3f27'], mid: ['#d06446', '#73261a'], lo: ['#9a3f2a', '#43150b'], scute: ['#dc7656', '#82301e'], spine: ['#ea8a66', '#93391f'], rim: ['#6a2414', '#2a0a04'] },
+  albino: { hi: ['#fbf3e2', '#e8d8b8'], mid: ['#efe2c6', '#d6c19a'], lo: ['#d6c3a0', '#b49c74'], scute: ['#f3e8d0', '#dccaa6'], spine: ['#f8eedb', '#e4d4b2'], rim: ['#c4ad86', '#9c845e'] },
+  pale: { hi: ['#f4e9c8', '#cdbb94'], mid: ['#e2d3aa', '#ad9a72'], lo: ['#bfae86', '#7f6d4c'], scute: ['#eadcb4', '#b9a57e'], spine: ['#f0e5c4', '#c6b38c'], rim: ['#9e8b66', '#5c4e36'] },
+  gold: { hi: ['#fff1a8', '#f2c94c'], mid: ['#f5d265', '#c99a1f'], lo: ['#d4a72a', '#8a6410'], scute: ['#f8dc72', '#d6a82a'], spine: ['#ffe58a', '#e2b53a'], rim: ['#9a7414', '#5a420a'] },
+};
+const MORPH_SKIN = { albino: { skin: ['#f6e4d8', '#ead0bf'], dark: ['#dcb8a6', '#c49c88'], light: ['#fff4ec', '#f6e2d4'] } };
 
 // Hatchlings: bright, round, big head and eyes, bit of eggshell. Juveniles: bold yellow rays on the shell.
 // Adults: dark, longer shell, growth rings, head stripes, long claws, moss and scratches.
 function look(g) {
-  const { shell: h, skin: hs, light: lt } = T.tint; // this turtle's own slight color variation
-  const sick = clamp((SICK - T.st.health) / SICK, 0, 1) * 0.65;
-  return {
+  let { shell: h, skin: hs, light: lt } = T.tint; // this turtle's own slight color variation
+  const sick = clamp((SICK - T.st.health) / SICK, 0, 1) * 0.65, M = T.morph || {};
+  if (M.color === 'dark') lt -= 0.3;
+  if (M.color === 'olive') h += 45;
+  if (M.color === 'blue') h += 175;
+  const L0 = {
     skin: mix('#a8d062', '#62793a', g, hs, sick, lt), skinDark: mix('#5f8a32', '#37461f', g, hs, sick, lt), skinLight: mix('#d2ee90', '#8aa156', g, hs, sick, lt),
     shellHi: mix('#dcc27c', '#7a5c2e', g, h, sick * 0.4, lt), shellMid: mix('#bb9850', '#56401d', g, h, sick * 0.4, lt), shellLo: mix('#8f7038', '#33240f', g, h, sick * 0.4, lt),
     scute: mix('#c8a75e', '#634a22', g, h, sick * 0.4, lt), spine: mix('#d6b66c', '#735628', g, h, sick * 0.4, lt), rim: mix('#6e5428', '#24190a', g, h, 0, lt),
@@ -1100,6 +1175,12 @@ function look(g) {
     rays: clamp((g - 0.1) * 4, 0, 1) * lerp(1.1, 0.4, g), rings: Math.floor(g * 4.6),
     stripes: clamp((g - 0.3) * 2.5, 0, 1), egg: clamp(1 - g / 0.15, 0, 1), moss: clamp((g - 0.78) * 5, 0, 1),
   };
+  const P = MORPH_SHELL[M.color];
+  if (P) { const m2 = (k, gr) => mix(P[k][0], P[k][1], g, 0, gr, M.color === 'gold' ? 0 : lt); Object.assign(L0, { shellHi: m2('hi', sick * 0.4), shellMid: m2('mid', sick * 0.4), shellLo: m2('lo', sick * 0.4), scute: m2('scute', sick * 0.4), spine: m2('spine', sick * 0.4), rim: m2('rim', 0) }); }
+  const K = MORPH_SKIN[M.color];
+  if (K) Object.assign(L0, { skin: mix(K.skin[0], K.skin[1], g, 0, sick, 0), skinDark: mix(K.dark[0], K.dark[1], g, 0, sick, 0), skinLight: mix(K.light[0], K.light[1], g, 0, sick, 0) });
+  L0.eyeCol = M.color === 'albino' ? '#c8323c' : '#1b1b1b';
+  return L0;
 }
 
 function hex(c, x, y, r, rot = 0) {
@@ -1199,7 +1280,7 @@ function drawTurtle(time) {
       c.beginPath(); c.arc(ex, ey, er * 0.85, happyEyes ? Math.PI : 0, happyEyes ? 0 : Math.PI, !happyEyes); c.stroke();
     } else {
       if (g > 0.6) { c.fillStyle = '#c9a23a'; c.beginPath(); c.arc(ex, ey, er * 1.15, 0, 7); c.fill(); } // golden iris ring on adults
-      c.fillStyle = '#1b1b1b'; c.beginPath(); c.arc(ex, ey, er, 0, 7); c.fill();
+      c.fillStyle = L.eyeCol; c.beginPath(); c.arc(ex, ey, er, 0, 7); c.fill();
       c.fillStyle = '#fff'; c.beginPath(); c.arc(ex + er * 0.3, ey - er * 0.3, er * 0.36, 0, 7); c.fill();
       if (g < 0.3) { c.beginPath(); c.arc(ex - er * 0.35, ey + er * 0.3, er * 0.16, 0, 7); c.fill(); } // extra baby sparkle
     }
@@ -1225,6 +1306,30 @@ function drawTurtle(time) {
   for (const y of [-1, 1]) for (const x of [-0.42, 0, 0.42]) scutes.push([x * S, y * S * 0.4 * k, S * 0.24, L.scute]);
   for (const x of [-0.5, 0, 0.5]) scutes.push([x * S, 0, S * 0.22, L.spine]);
   for (const [x, y, r, col] of scutes) { hex(c, x, y, r, Math.PI / 6); c.fillStyle = col; c.fill(); c.stroke(); }
+  const Mo = T.morph || {};
+  if (Mo.pattern === 'spots') { // little yellow spots on every scute
+    c.fillStyle = Mo.color === 'albino' ? 'rgba(230,170,140,0.9)' : 'rgba(250,214,92,0.9)';
+    for (const [x, y, r] of scutes) for (let i = 0; i < 3; i++) { const a = i * 2.1 + x * 0.1; c.beginPath(); c.arc(x + Math.cos(a) * r * 0.45, y + Math.sin(a) * r * 0.45, Math.max(0.8, r * 0.15), 0, 7); c.fill(); }
+  }
+  if (Mo.pattern === 'stripes') { // bold stripes radiating across the shell
+    c.save(); c.beginPath(); c.ellipse(0, 0, S, S * ar, 0, 0, 7); c.clip();
+    c.strokeStyle = 'rgba(240,200,70,0.75)'; c.lineWidth = Math.max(1, S * 0.07); c.lineCap = 'round';
+    for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; c.beginPath(); c.moveTo(Math.cos(a) * S * 0.25, Math.sin(a) * S * ar * 0.25); c.lineTo(Math.cos(a) * S, Math.sin(a) * S * ar); c.stroke(); }
+    c.restore();
+  }
+  if (Mo.spikes) for (const [x, y, r] of scutes) { // a pointy knob on each scute
+    const kg = c.createRadialGradient(x - r * 0.12, y - r * 0.15, 0, x, y, r * 0.36);
+    kg.addColorStop(0, L.shellHi); kg.addColorStop(0.6, L.spine); kg.addColorStop(1, L.rim);
+    c.fillStyle = kg; c.beginPath(); c.arc(x, y, r * 0.36, 0, 7); c.fill();
+    c.fillStyle = '#ffffffaa'; c.beginPath(); c.arc(x - r * 0.1, y - r * 0.12, r * 0.09, 0, 7); c.fill();
+  }
+  if (Mo.color === 'gold') { // a shine that sweeps across the shell
+    c.save(); c.beginPath(); c.ellipse(0, 0, S, S * ar, 0, 0, 7); c.clip();
+    const sx = ((time * 0.5) % 2.4 - 1.2) * S;
+    const sg2 = c.createLinearGradient(sx - S * 0.3, 0, sx + S * 0.3, 0);
+    sg2.addColorStop(0, 'rgba(255,255,230,0)'); sg2.addColorStop(0.5, 'rgba(255,255,230,0.55)'); sg2.addColorStop(1, 'rgba(255,255,230,0)');
+    c.fillStyle = sg2; c.fillRect(-S, -S, S * 2, S * 2); c.restore();
+  }
   // juvenile rays: bright lines radiating from each scute's center
   if (L.rays > 0.02) {
     c.strokeStyle = `rgba(245,214,96,${Math.min(1, L.rays)})`; c.lineWidth = Math.max(1, S * 0.035); c.lineCap = 'round';
@@ -1982,11 +2087,165 @@ function job(k, who = null, amount = 1) {
   renderPills();
 }
 
+// ---------- painting the ground ----------
+// The yard is a grid of TILE-sized squares. Painted ones are drawn as soft rounded patches (paths as neat paving),
+// built into Path2D shapes per 8x8-tile chunk and only rebuilt when something changes, so drawing stays cheap.
+const GROUND = {
+  // cost = one-time price to unlock that brush; painting with it is free after that
+  sand: { name: 'Sand (erase)', col: '#d9c494', cost: 0 },
+  grass: { name: 'Grass', col: '#7fb04f', cost: 50, dots: ['#6a9a40', '#93c25e'] },
+  dirt: { name: 'Dirt', col: '#9b7650', cost: 40, dots: ['#86643f', '#ad8a62'] },
+  gravel: { name: 'Gravel', col: '#b9b2a6', cost: 60, dots: ['#8f887c', '#d6d0c4', '#a39b8e'] },
+  moss: { name: 'Moss', col: '#5c8c3c', cost: 100, dots: ['#4c7a30', '#6fa24a'] },
+  stone: { name: 'Stone path', col: '#c9c2b5', cost: 150, pave: 'stone' },
+  meadow: { name: 'Meadow', col: '#86b552', cost: 180, dots: ['#f26d8f', '#f7d14a', '#ffffff', '#b77df0'], big: true },
+  brick: { name: 'Brick path', col: '#b5654a', cost: 220, pave: 'brick' },
+  wood: { name: 'Boardwalk', col: '#a8794a', cost: 260, pave: 'wood' },
+  water: { name: 'Water', col: '#3f8fc4', cost: 1000 }, // dearer than every fountain upgrade together
+};
+const CHUNK = 8;
+let gChunks = new Map(), gDirty = new Set(), waterTiles = [];
+function groundChanged() { gChunks = new Map(); gDirty = new Set(['all']); waterTiles = Object.keys(ground).filter(k => ground[k] === 'water').map(k => { const [c, r] = k.split(',').map(Number); return { x: (c + 0.5) * TILE, y: (r + 0.5) * TILE }; }); }
+function nearestWater(p) { let b = null, bd = 1e9; for (const w of waterTiles) { const d = dist(w, p); if (d < bd) { bd = d; b = w; } } return b; } // a tile centre (same object each time)
+const tileRand = (c, r) => seeded(((c * 73856093) ^ (r * 19349663)) % 1000003 / 1000003 + 0.0001);
+// Smooth auto-tiling: each painted tile is a square whose OUTSIDE corners are rounded (where neither side
+// neighbour matches) and whose INSIDE corners get a curved fillet, so neighbouring tiles of one type join into
+// a single flowing shape instead of a row of bumps.
+const SHADE = { // rim (drawn under the fill so only the outer edge shows) and deep-water colours
+  grass: '#5f8f3a', moss: '#466f2c', meadow: '#679a3e', dirt: '#7d5c3c', gravel: '#989083',
+  stone: '#a39b8e', brick: '#8e4a34', wood: '#7a5530', water: '#c2a874',
+};
+const LAYERS = ['bank', 'water', 'deep', 'dirt', 'gravel', 'grass', 'moss', 'meadow', 'stone', 'brick', 'wood']; // bottom to top
+function addTileShape(path, x, y, rad, same, c, r) {
+  const n = same(c, r - 1), e = same(c + 1, r), s2 = same(c, r + 1), w = same(c - 1, r);
+  const o = 0.6; // tiny overlap so neighbours never show a hairline seam
+  path.roundRect(x - o, y - o, TILE + 2 * o, TILE + 2 * o, [!n && !w ? rad : 0, !n && !e ? rad : 0, !s2 && !e ? rad : 0, !s2 && !w ? rad : 0]);
+  const fillet = (px, py, dx, dy) => { // concave corner: a small curved wedge in the empty diagonal square
+    path.moveTo(px, py); path.lineTo(px + dx * rad, py); path.quadraticCurveTo(px, py, px, py + dy * rad); path.closePath();
+  };
+  // (fillets are drawn from the corner of THIS tile into the empty diagonal; outward directions per corner)
+  if (n && e && !same(c + 1, r - 1)) fillet(x + TILE, y, 1, -1);
+  if (n && w && !same(c - 1, r - 1)) fillet(x, y, -1, -1);
+  if (s2 && e && !same(c + 1, r + 1)) fillet(x + TILE, y + TILE, 1, 1);
+  if (s2 && w && !same(c - 1, r + 1)) fillet(x, y + TILE, -1, 1);
+}
+function buildChunk(cx, cy) {
+  const layers = {}, L = (name, kind, col, extra) => (layers[name + kind + col] ??= { z: LAYERS.indexOf(name) * 10 + (kind === 'rim' ? 0 : kind === 'fill' ? 1 : kind === 'dots' ? 2 : 3), kind, col, path: new Path2D(), ...extra });
+  const typeAt = (c, r) => ground[`${c},${r}`];
+  for (let c = cx * CHUNK; c < (cx + 1) * CHUNK; c++) for (let r = cy * CHUNK; r < (cy + 1) * CHUNK; r++) {
+    const t = typeAt(c, r); if (!t) continue;
+    const G = GROUND[t], x = c * TILE, y = r * TILE, rnd = tileRand(c, r);
+    const same = (cc, rr) => typeAt(cc, rr) === t;
+    const rad = G.pave ? 7 : TILE * 0.48;
+    if (t === 'water') {
+      addTileShape(L('bank', 'rim', SHADE.water, { w: 16 }).path, x, y, rad, same, c, r); // sandy bank: a wide stroke under the water
+      addTileShape(L('water', 'fill', '#5fb0dc').path, x, y, rad, same, c, r);
+      const deep = (cc, rr) => same(cc, rr) && same(cc - 1, rr) && same(cc + 1, rr) && same(cc, rr - 1) && same(cc, rr + 1);
+      if (deep(c, r)) addTileShape(L('deep', 'fill', '#3d88c0').path, x, y, TILE * 0.48, deep, c, r); // darker in the middle
+      if (rnd() < 0.5) { const sp = L('deep', 'dots', '#ffffff55').path, ex = x + 8 + rnd() * 24, ey = y + 8 + rnd() * 24; sp.moveTo(ex + 6, ey); sp.ellipse(ex, ey, 6, 1.6, 0, 0, Math.PI * 2); }
+      continue;
+    }
+    addTileShape(L(t, 'rim', SHADE[t], { w: 3 }).path, x, y, rad, same, c, r);
+    addTileShape(L(t, 'fill', G.col).path, x, y, rad, same, c, r);
+    const dot = (path, dx, dy, rr2) => { path.moveTo(dx + rr2, dy); path.arc(dx, dy, rr2, 0, Math.PI * 2); };
+    if (G.dots) for (let i = 0; i < (G.big ? 7 : 5); i++) dot(L(t, 'dots', G.dots[Math.floor(rnd() * G.dots.length)]).path, x + 5 + rnd() * (TILE - 10), y + 5 + rnd() * (TILE - 10), G.big ? 2.6 : 1.6);
+    if (G.pave === 'stone') { const sp = L(t, 'lines', SHADE.stone).path; for (const [a, b] of [[2, 2], [TILE / 2 + 1, 2], [2, TILE / 2 + 1], [TILE / 2 + 1, TILE / 2 + 1]]) sp.rect(x + a, y + b, TILE / 2 - 3, TILE / 2 - 3); }
+    if (G.pave === 'brick') { const sp = L(t, 'lines', SHADE.brick).path; for (let i = 1; i < 4; i++) { sp.moveTo(x, y + i * 10); sp.lineTo(x + TILE, y + i * 10); } for (let i = 0; i < 4; i++) for (let bx = i % 2 ? 10 : 0; bx < TILE; bx += 20) { sp.moveTo(x + bx, y + i * 10); sp.lineTo(x + bx, y + i * 10 + 10); } }
+    if (G.pave === 'wood') { const sp = L(t, 'lines', SHADE.wood).path; for (let i = 1; i < 5; i++) { sp.moveTo(x + i * 8, y); sp.lineTo(x + i * 8, y + TILE); } const nl = L(t, 'dots', '#5a3c20').path; for (let i = 0; i < 5; i++) { dot(nl, x + i * 8 + 4, y + 4, 0.9); dot(nl, x + i * 8 + 4, y + TILE - 4, 0.9); } }
+  }
+  return Object.values(layers);
+}
+function drawGround(v) {
+  if (gDirty.has('all')) {
+    gChunks = new Map();
+    const keys = new Set(Object.keys(ground).map(k => { const [c, r] = k.split(',').map(Number); return `${Math.floor(c / CHUNK)},${Math.floor(r / CHUNK)}`; }));
+    for (const k of keys) { const [cx, cy] = k.split(',').map(Number); gChunks.set(k, buildChunk(cx, cy)); }
+  } else for (const k of gDirty) { const [cx, cy] = k.split(',').map(Number); gChunks.set(k, buildChunk(cx, cy)); }
+  gDirty.clear();
+  // Layer by layer across every visible chunk (not chunk by chunk), so one chunk's bank can't cover its neighbour's water.
+  const span = CHUNK * TILE, ops = [];
+  for (const [k, list] of gChunks) {
+    const [cx, cy] = k.split(',').map(Number);
+    if (cx * span > v.x1 + 30 || (cx + 1) * span < v.x0 - 30 || cy * span > v.y1 + 30 || (cy + 1) * span < v.y0 - 30) continue;
+    for (const o of list) ops.push(o);
+  }
+  ops.sort((a, b) => a.z - b.z);
+  const c = ctx; c.lineJoin = 'round';
+  for (const o of ops) {
+    if (o.kind === 'rim') { c.strokeStyle = o.col; c.lineWidth = o.w; c.stroke(o.path); }
+    else if (o.kind === 'lines') { c.strokeStyle = o.col; c.lineWidth = 1.2; c.stroke(o.path); }
+    else { c.fillStyle = o.col; c.fill(o.path); }
+  }
+  c.lineJoin = 'miter';
+}
+
+// paint mode
+let painting = false, paintType = 'grass', brush = 2, paintSpent = 0, lastPaint = null, paintBroke = false;
+const paintbar = document.getElementById('paintbar');
+const BRUSHES = { 1: 'Small', 2: 'Medium', 3: 'Big' };
+const hasBrush = k => up.brushes.includes(k);
+function renderPaintbar() {
+  paintbar.querySelector('.sw').innerHTML = Object.entries(GROUND).map(([k, g]) =>
+    `<button data-k="${k}" class="${k === paintType ? 'on' : ''} ${hasBrush(k) ? '' : 'locked'}"><i style="background:${g.col}"></i>${g.name}<span>${hasBrush(k) ? '✓' : '🔒 ⭐' + g.cost}</span></button>`).join('');
+  paintbar.querySelector('.brush').textContent = `🖌️ ${BRUSHES[brush]}`;
+  const locked = !hasBrush(paintType), ub = paintbar.querySelector('.unlock');
+  ub.hidden = !locked;
+  if (locked) ub.textContent = `🔓 ⭐${GROUND[paintType].cost}`;
+  paintbar.querySelector('.info').textContent = locked ? `Unlock ${GROUND[paintType].name} once, then paint with it for free` : 'One finger paints · two fingers move & zoom';
+}
+const toolsEl = document.getElementById('tools');
+function startPaint() {
+  shop.hidden = true; endArrange(); placing = null;
+  painting = true; paintSpent = 0;
+  toolsEl.style.display = 'none'; // the palette takes the toolbar's place, and the camera can scroll the yard above it
+  paintbar.style.bottom = 'calc(env(safe-area-inset-bottom) + 10px)';
+  renderPaintbar(); paintbar.hidden = false;
+  document.getElementById('toybar').hidden = true;
+  requestAnimationFrame(() => { measureBottom(); clampCam(); });
+  say('Pick a ground and drag one finger to paint · two fingers move the camera', 3500);
+}
+function endPaint() {
+  if (!painting) return;
+  painting = false; paintbar.hidden = true; gest = null;
+  toolsEl.style.display = '';
+  measureBottom(); clampCam();
+  save();
+}
+function paintAt(p) {
+  const rad = brush - 1, c0 = Math.floor(p.x / TILE), r0 = Math.floor(p.y / TILE);
+  let changed = false;
+  for (let dc = -rad; dc <= rad; dc++) for (let dr = -rad; dr <= rad; dr++) {
+    if (dc * dc + dr * dr > rad * rad + rad) continue; // roundish brush
+    const c = c0 + dc, r = r0 + dr;
+    if (c < 0 || r < 0 || c * TILE >= YW || r * TILE >= YH) continue;
+    const k = `${c},${r}`, cur = ground[k] || 'sand';
+    if (cur === paintType) continue;
+    if (!hasBrush(paintType)) { if (!paintBroke) { say(`🔒 Unlock ${GROUND[paintType].name} first`, 2500); paintBroke = true; } return; }
+    if (paintType === 'sand') delete ground[k]; else ground[k] = paintType;
+    for (const [dc2, dr2] of [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) gDirty.add(`${Math.floor((c + dc2) / CHUNK)},${Math.floor((r + dr2) / CHUNK)}`); changed = true;
+  }
+  if (changed) {
+    if (paintType === 'water' || waterTiles.length) waterTiles = Object.keys(ground).filter(k => ground[k] === 'water').map(k => { const [c, r] = k.split(',').map(Number); return { x: (c + 0.5) * TILE, y: (r + 0.5) * TILE }; });
+    snd.play('drop'); renderPaintbar();
+  }
+}
+paintbar.querySelector('.sw').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; paintType = b.dataset.k; renderPaintbar(); snd.play('click'); });
+paintbar.querySelector('.brush').onclick = () => { brush = brush % 3 + 1; renderPaintbar(); snd.play('click'); };
+paintbar.querySelector('.done').onclick = () => endPaint();
+paintbar.querySelector('.unlock').onclick = () => {
+  const g = GROUND[paintType];
+  if (hasBrush(paintType)) return;
+  if (stars < g.cost) return say(`You need ⭐${g.cost} to unlock ${g.name}`, 2500);
+  stars -= g.cost; up.brushes.push(paintType); snd.play('buy'); emit(cam.x, cam.y, 'sparkle', 12);
+  say(`🔓 ${g.name} unlocked! Paint away`, 2500); renderPaintbar(); save();
+};
+
 // ---------- multiple yards ----------
 const MAX_YARDS = 5, YARD_COSTS = [1500, 4000, 8000, 15000];
 const yardCost = () => YARD_COSTS[yards.length - 1];
 function resetYardRuntime() { // things that only make sense in the yard you were just in
   endArrange();
+  endPaint();
   ball = null; crabs = []; bugs = []; frogs = []; birds = []; ladybugs = []; flies = []; parts = [];
   placing = null; marker = null; camFollow = null; feederT = 0;
 }
@@ -2008,9 +2267,9 @@ function switchYard(j) {
 }
 function buildYard() {
   const n = yards.length + 1;
-  const W0 = base.w, H0 = base.h, h = makeTurtle({ growth: 0, x: W0 / 2, y: H0 / 2, a: rand(-3, 3) });
+  const W0 = base.w, H0 = base.h, h = makeTurtle({ growth: 0, x: W0 / 2, y: H0 / 2, a: rand(-3, 3), morph: rollMorph() });
   yards[yardIdx] = packYard();
-  yards.push({ name: `Yard ${n}`, t: Date.now(), turtles: [packTurtle(h)], sel: 0, poops: [], level: 1, foods: [], up: {}, objs: [], plots: [],
+  yards.push({ name: `Yard ${n}`, t: Date.now(), turtles: [packTurtle(h)], sel: 0, poops: [], level: 1, foods: [], up: {}, objs: [], plots: [], ground: {},
     bowlPos: { x: W0 - 60, y: 58 }, cam: { x: W0 / 2, y: H0 / 2, z: 1 } });
   const j = yards.length - 1;
   shop.hidden = true;
@@ -2493,6 +2752,7 @@ document.querySelectorAll('#tools button').forEach(b => b.addEventListener('clic
     b.innerHTML = foodType === 'berry' ? '🍓<span>Berry</span>' : '🥬<span>Feed</span>';
     return say(foodType === 'berry' ? 'Berries 🍓 sweet treats, but too many make a chubby turtle' : 'Lettuce 🥬 healthy everyday food', 2600);
   }
+  endPaint();
   mode = b.dataset.mode;
   placing = null; endArrange();
   document.querySelectorAll('#tools button').forEach(x => x.classList.toggle('on', x === b));
@@ -2548,6 +2808,7 @@ cv.addEventListener('pointerdown', e => {
   }
   if (ptrs.size > 2) return;
   const p = s2w(e.clientX, e.clientY);
+  if (painting) { gest = { kind: 'paint' }; lastPaint = p; paintBroke = false; paintAt(p); return; }
   if (arranging) { // grab the nearest movable thing under the finger
     const o = movables().filter(o => dist(p, o) < hitR(o) + 10 / cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0];
     if (o) { gest = { kind: 'move', o, dx: o.x - p.x, dy: o.y - p.y, sx: e.clientX, sy: e.clientY, moved: false }; return; }
@@ -2563,7 +2824,11 @@ cv.addEventListener('pointermove', e => {
   if (!ptrs.has(e.pointerId)) return;
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (!gest) return;
-  if (gest.kind === 'move') {
+  if (gest.kind === 'paint' && ptrs.size === 1) {
+    const p = s2w(e.clientX, e.clientY), d = dist(p, lastPaint), n = Math.ceil(d / (TILE * 0.4));
+    for (let i = 1; i <= n; i++) paintAt({ x: lastPaint.x + (p.x - lastPaint.x) * i / n, y: lastPaint.y + (p.y - lastPaint.y) * i / n });
+    lastPaint = p;
+  } else if (gest.kind === 'move') {
     const p = s2w(e.clientX, e.clientY);
     if (Math.hypot(e.clientX - gest.sx, e.clientY - gest.sy) > 6) gest.moved = true;
     if (gest.moved) { gest.o.x = p.x + gest.dx; gest.o.y = p.y + gest.dy; keepInYard(gest.o); }
@@ -2574,7 +2839,7 @@ cv.addEventListener('pointermove', e => {
     if (drag.hist.length > 6) drag.hist.shift();
   } else if (gest.kind === 'pinch' && ptrs.size >= 2) {
     const [a, b] = [...ptrs.values()], mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    cam.z = clamp(gest.z0 * Math.hypot(a.x - b.x, a.y - b.y) / gest.d0, zMin(), Z_MAX);
+    cam.z = clamp(gest.z0 * Math.hypot(a.x - b.x, a.y - b.y) / gest.d0, zMin(), zMax());
     cam.x = gest.w0.x - (mid.x - vcx()) / cam.z; cam.y = gest.w0.y - (mid.y - vcy()) / cam.z;
     clampCam();
   } else if (gest.kind === 'maybe' || gest.kind === 'pan') {
@@ -2595,7 +2860,7 @@ function pointerEnd(e) {
   if (gest?.kind === 'ball') endDrag();
   else if (gest?.kind === 'move' && !gest.moved && gest.o.kind === 'deco' && e.type === 'pointerup') {
     const o = gest.o;
-    if (confirm(`Remove this ${DECOS[o.type].name.toLowerCase()}? (no refund)`)) { objs = objs.filter(x => x !== o); emit(o.x, o.y, 'sparkle', 6); save(); }
+    askConfirm(`Remove this ${DECOS[o.type].name.toLowerCase()}?`, "You won't get the stars back.", 'Remove', () => { objs = objs.filter(x => x !== o); emit(o.x, o.y, 'sparkle', 6); save(); });
   }
   else if (gest?.kind === 'maybe' && e.type === 'pointerup') tap(s2w(e.clientX, e.clientY));
   if (gest?.kind === 'pinch' && ptrs.size) gest = { kind: 'done' }; // the finger left behind doesn't tap
@@ -2606,7 +2871,7 @@ cv.addEventListener('pointercancel', pointerEnd);
 cv.addEventListener('wheel', e => { // desktop zoom
   e.preventDefault();
   const w0 = s2w(e.clientX, e.clientY);
-  cam.z = clamp(cam.z * Math.exp(-e.deltaY * 0.0015), zMin(), Z_MAX);
+  cam.z = clamp(cam.z * Math.exp(-e.deltaY * 0.0015), zMin(), zMax());
   cam.x = w0.x - (e.clientX - vcx()) / cam.z; cam.y = w0.y - (e.clientY - vcy()) / cam.z;
   clampCam();
 }, { passive: false });
@@ -2707,7 +2972,7 @@ function adopt() {
   const suggestion = randomName();
   const name = suggestion; // the turtle arrives right away; naming it comes after
   shop.hidden = true;
-  const t = makeTurtle({ name, tint: pickTint(turtles), x: clamp(cam.x + rand(-80, 80), 60, YW - 60), y: clamp(cam.y + rand(-80, 80), 60, YH - 60), a: rand(-3, 3) });
+  const t = makeTurtle({ name, tint: pickTint(turtles), x: clamp(cam.x + rand(-80, 80), 60, YW - 60), y: clamp(cam.y + rand(-80, 80), 60, YH - 60), a: rand(-3, 3), morph: rollMorph() });
   turtles.push(t); use(t); resetFeet();
   emit(t.x, t.y, 'sparkle', 12); emit(t.x, t.y - 10, 'heart', 3); snd.play('hatch');
   sel = t; buzz([20, 40, 20]);
@@ -2715,6 +2980,7 @@ function adopt() {
   askName('Name your new hatchling 🥚', name, n => {
     t.name = n; save();
     say(`Welcome, ${n}! Seems ${personality(t.traits).toLowerCase()} 🥚`, 3000);
+    announceMorph(t);
   });
 }
 // In-game name box (the browser's prompt() is blocked in some browsers, like kids' tablets).
@@ -2722,6 +2988,7 @@ function adopt() {
 const namer = document.getElementById('namer'), namerIn = namer.querySelector('input');
 let namerDone = null;
 function askName(title, current, done, max = 14) {
+  setNamerMode(false);
   namer.querySelector('.title').textContent = title;
   namerIn.maxLength = max; namerIn.value = current; namerDone = n => done((n || '').trim().slice(0, max) || current);
   namer.hidden = false;
@@ -2734,6 +3001,22 @@ function closeNamer(ok) {
   f?.(ok ? namerIn.value : '');
 }
 namer.querySelector('.ok').onclick = () => closeNamer(true);
+// Yes/no questions in the same box (browser confirm() popups are blocked on some tablets).
+function setNamerMode(confirming) {
+  namerIn.hidden = confirming; namer.querySelector('.ok').hidden = confirming;
+  namer.querySelector('.msg').hidden = !confirming; namer.querySelector('.row2').hidden = !confirming;
+}
+let confirmYes = null;
+function askConfirm(title, msg, yesLabel, onYes) {
+  setNamerMode(true);
+  namer.querySelector('.title').textContent = title;
+  namer.querySelector('.msg').textContent = msg;
+  namer.querySelector('.yes').textContent = yesLabel;
+  confirmYes = onYes; namerDone = null;
+  namer.hidden = false;
+}
+namer.querySelector('.no').onclick = () => { namer.hidden = true; confirmYes = null; };
+namer.querySelector('.yes').onclick = () => { namer.hidden = true; const f = confirmYes; confirmYes = null; f?.(); };
 namerIn.addEventListener('keydown', e => { if (e.key === 'Enter') closeNamer(true); });
 document.getElementById('away-ok').onclick = () => { document.getElementById('away').hidden = true; };
 
@@ -2743,7 +3026,8 @@ stageEl.addEventListener('click', () => {
   if (!isPicked()) return openRoster();
   menu.querySelector('.title').textContent = `🐢 ${sel.name}`;
   menu.querySelector('.persona').textContent = personality(sel.traits);
-  menu.querySelector('.age').textContent = `🎂 ${ageText(sel)}`;
+  const mi = morphInfo(sel);
+  menu.querySelector('.age').textContent = `🎂 ${ageText(sel)}` + (mi.label ? ` · ${mi.rarity >= 3 ? '🌟' : '✨'} ${mi.label} (${RARITY_NAMES[mi.rarity]})` : '');
   menu.querySelector('.mood').textContent = moods(sel);
   menu.querySelector('.traits').innerHTML = TRAITS.map(d => {
     const n = dots(sel.traits[d.k]);
@@ -2782,7 +3066,7 @@ function openRoster() {
     const col = well < 30 ? '#ef6a5a' : well < 55 ? '#f2c14e' : '#8fd16a';
     const stage = t.growth >= 1 ? 'Adult' : stageOf(t.growth);
     return `<button class="who" data-i="${turtles.indexOf(t)}"><b>${esc(t.name)}</b><span class="chips">${statusIcons(t)}</span>`
-      + `<small>${stage} · ${ageText(t)} · ${personality(t.traits)}</small><span class="well"><i style="width:${well.toFixed(0)}%;background:${col}"></i></span></button>`;
+      + `<small>${stage} · ${ageText(t)} · ${personality(t.traits)}${morphInfo(t).label ? ' · ' + (morphInfo(t).rarity >= 3 ? '🌟 ' : '✨ ') + morphInfo(t).label : ''}</small><span class="well"><i style="width:${well.toFixed(0)}%;background:${col}"></i></span></button>`;
   }).join('');
   roster.hidden = false;
 }
@@ -2810,11 +3094,13 @@ document.getElementById('m-release').onclick = () => {
   menu.hidden = true;
   if (turtles.length < 2) return;
   const t = sel;
-  if (!confirm(`Release ${t.name} back to the wild? This can't be undone.`)) return;
-  t.releasing = 1; // fades out, then is removed in the loop
-  emit(t.x, t.y, 'sparkle', 12); emit(t.x, t.y - t.S, 'heart', 3);
-  sel = turtles.find(o => o !== t);
-  say(`Bye ${t.name}! 🌿`); buzz(20);
+  askConfirm(`Release ${t.name}?`, `${t.name} will go back to the wild. This can't be undone.`, '🌿 Release', () => {
+    if (!turtles.includes(t) || turtles.length < 2) return;
+    t.releasing = 1; // fades out, then is removed in the loop
+    emit(t.x, t.y, 'sparkle', 12); emit(t.x, t.y - t.S, 'heart', 3);
+    sel = turtles.find(o => o !== t);
+    say(`Bye ${t.name}! 🌿`); buzz(20);
+  });
 };
 
 // ---------- shop ----------
@@ -2837,6 +3123,7 @@ function buildShop() {
     ? { icon: '🏡', name: `${yNext.name} yard`, desc: `More room to roam, and space for ${yNext.fits} turtles.`, cost: yNext.cost, buy: () => { up.yard++; applyYard(); say('Bigger yard! Drag to look around · pinch to zoom', 3500); } }
     : { icon: '🏡', name: `${YARDS[up.yard].name} yard`, desc: 'The biggest yard there is.', done: 'Maxed' });
   if (yards.length < MAX_YARDS) rows.push({ icon: '🏞️', name: 'Build another yard', desc: `A brand-new yard with its own upgrades, and a free hatchling to start it. You have ${yards.length}.`, cost: yardCost(), buy: buildYard });
+  rows.push({ icon: '🖌️', name: 'Paint the ground', desc: 'Grass, flowers, paths and water in any shape you like. A few ⭐ per tile.', action: startPaint, btn: 'Paint' });
   rows.push({ icon: '✋', name: 'Arrange yard', desc: 'Drag things to new spots. Tap a decoration to remove it.', action: startArrange, btn: 'Arrange' });
   rows.push({ sec: '🤖 Care & automation' });
   rows.push(bNext
@@ -2975,7 +3262,7 @@ function frame(now) {
   if (turtles.some(t => t.releasing !== undefined && (t.releasing -= dt) <= 0)) {
     turtles = turtles.filter(t => !(t.releasing <= 0));
     if (!turtles.length) { // the yard is never empty: a new hatchling wanders in
-      const t = makeTurtle({ name: randomName(), growth: 0, x: cam.x, y: cam.y });
+      const t = makeTurtle({ name: randomName(), growth: 0, x: cam.x, y: cam.y, morph: rollMorph() });
       turtles.push(t); use(t); resetFeet(); graceT = GRACE_SECS;
       setTimeout(() => say(`🥚 A new hatchling, ${t.name}, wandered into your yard`), 1200);
     }
@@ -3077,8 +3364,9 @@ function frame(now) {
 
 resize(); // measures the HUD
 const info = load();
+rescaleToStandard();
 const firstWorld = !base;
-if (!base) base = { w: Math.max(340, W), h: Math.max(460, viewH()) };
+if (!base) base = { ...STD_BASE };
 if (info.legacy) for (const p of [...turtles, ...poops, ...foods]) p.y -= TOP; // old saves used screen coordinates
 if (!info.hadBowl) { bowl.x = base.w - 60; bowl.y = 58; }
 if (info.fresh) { turtles[0].x = base.w / 2; turtles[0].y = base.h / 2; }

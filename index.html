@@ -79,6 +79,19 @@
   #toybar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 92px);
     display: flex; gap: 6px; padding: 5px; border-radius: 18px; background: #0006; backdrop-filter: blur(6px); }
   #toybar[hidden] { display: none; }
+  #paintbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 92px); width: min(560px, 96vw);
+    display: grid; gap: 6px; padding: 8px; border-radius: 18px; background: #000a; backdrop-filter: blur(6px); z-index: 5; }
+  #paintbar[hidden] { display: none; }
+  #paintbar .sw { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+  #paintbar .sw button { flex: 0 0 auto; border: 0; border-radius: 12px; width: 62px; padding: 4px 2px; background: #fff2; color: #fff; font: inherit; font-size: 10px; display: grid; justify-items: center; gap: 2px; }
+  #paintbar .sw button i { display: block; width: 34px; height: 24px; border-radius: 8px; box-shadow: inset 0 0 0 2px #0003; }
+  #paintbar .sw button.on { background: #fffd; color: #2c3320; box-shadow: 0 0 0 2px #b8f08c; }
+  #paintbar .row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px; align-items: center; color: #fff; font-size: 12px; }
+  #paintbar .row button { border: 0; border-radius: 12px; padding: 8px 12px; font-size: 14px; font-weight: 700; background: #fff3; color: #fff; }
+  #paintbar .row button.done { background: #8fd16a; color: #2c3320; }
+  #paintbar .row button.unlock { background: #ffd84a; color: #2c3320; }
+  #paintbar .row button[hidden] { display: none; }
+  #paintbar .sw button.locked i { opacity: .45; }
   #arrange-done { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 96px);
     border: 0; border-radius: 16px; padding: 10px 18px; background: #5d8a3a; color: #fff; font-size: 16px; font-weight: 700; box-shadow: 0 4px 14px #0006; }
   #arrange-done[hidden] { display: none; }
@@ -142,6 +155,10 @@
   #namer input:focus { border-color: #8fd16a; }
   #namer button { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
   #namer button.ok { background: #8fd16a; }
+  #namer .msg { text-align: center; color: #5a5946; font-size: 14px; margin-top: -4px; }
+  #namer .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #namer .row2[hidden], #namer input[hidden], #namer .ok[hidden], #namer .msg[hidden] { display: none; }
+  #namer button.danger { background: #f0a090; }
   #menu button.ghost { background: transparent; color: #6b6a55; }
   #hint { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 146px); transform: translateX(-50%);
     background: #000a; color: #fff; padding: 6px 14px; border-radius: 14px; font-size: 14px; white-space: nowrap;
@@ -166,6 +183,7 @@
 <div id="jobs" class="sheet" hidden><div class="card"><h2>📋 Today's jobs</h2><div class="sub"></div><div class="list"></div><button class="close">Close</button></div></div>
 <div id="find" hidden><div class="card"><div class="big"></div><div class="title"></div><div class="tag"></div><div class="fact"></div><button>Yay!</button></div></div>
 <div id="toybar" hidden></div>
+<div id="paintbar" hidden><div class="sw"></div><div class="row"><span class="info"></span><button class="unlock" hidden></button><button class="brush">Brush</button><button class="done">✓ Done</button></div></div>
 <button id="arrange-done" hidden>✓ Done arranging</button>
 <div id="hint"></div>
 <div id="shop" hidden><div class="card">
@@ -192,7 +210,9 @@
 <div id="namer" hidden><div class="card">
   <div class="title"></div>
   <input maxlength="14" autocomplete="off" enterkeyhint="done">
+  <div class="msg" hidden></div>
   <button class="ok">OK</button>
+  <div class="row2" hidden><button class="no">Cancel</button><button class="yes danger">Yes</button></div>
 </div></div>
 <div id="away" hidden><div class="card"><h2>Welcome back! 🐢</h2><div class="body"></div><button id="away-ok">Check on them</button></div></div>
 <div id="tools">
