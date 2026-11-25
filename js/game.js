@@ -568,7 +568,7 @@ function simulateAway(secs) {
   return { secs, rep, dryAt, fed, cleaned, grown };
 }
 
-const fmtTime = s => s < 3600 ? `${Math.round(s / 60)} min` : s < 86400 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : `${Math.floor(s / 86400)} d ${Math.floor(s % 86400 / 3600)} h`;
+const fmtTime = s => { const m = Math.round(s / 60); return m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d ${Math.floor(m % 1440 / 60)} h`; }; // round once, so never "1 h 60 min"
 function showAway(report, where) {
   const box = document.getElementById('away');
   const lines = [];
@@ -1961,7 +1961,7 @@ const ITEMS = {};
 for (const s of SETS) for (const [id, icon, name, fact, rar] of s.items) ITEMS[id] = { id, icon, name, fact, rar, set: s.k };
 const RARITY = { 1: 'Common', 2: 'Uncommon', 3: 'Rare' };
 const DROP_EVERY = 3 * 3600e3, MAX_DROPS = 3, MILESTONES = { 7: 50, 30: 200, 100: 500 };
-let loot = { last: 0, treasures: [], found: {}, sets: [], visits: 0, day: '', gift: null, jobs: null };
+let loot = { last: 0, treasures: [], found: {}, sets: [], visits: 0, day: '', gift: null, jobs: null, powers: {}, boostUntil: 0 };
 let pendingReward = null;
 
 // pick a find: commons are likelier; things you don't have yet get a little boost
@@ -1993,7 +1993,7 @@ function addFind(id) { // returns true if it's new
   loot.found[id] = (loot.found[id] || 0) + 1;
   const set = SETS.find(s => s.k === ITEMS[id].set);
   if (isNew && !loot.sets.includes(set.k) && set.items.every(([i]) => loot.found[i])) { loot.sets.push(set.k); pendingReward = set; }
-  renderPills();
+  renderPills(); renderPowers();
   return isNew;
 }
 function collectTreasure(tr) {
@@ -2030,7 +2030,8 @@ findEl.querySelector('button').onclick = () => {
   if (!pendingReward) return;
   const set = pendingReward, d = DECOS[set.reward]; pendingReward = null;
   earn(50, cam.x, cam.y); snd.play('fanfare');
-  showFind(d.icon, `${set.name} complete!`, `+50 ⭐ and a ${d.name} for your yard`, 'Tap the yard to choose where it goes.');
+  const P = POWERS[set.k];
+  showFind(d.icon, `${set.name} complete!`, `+50 ⭐ and a ${d.name}, with the power ${P.icon} ${P.name}!`, `${P.desc} Tap the yard to choose where the ${d.name} goes: it works in the yard it's in.`);
   const o = newObj('deco'); o.type = set.reward; o.seed = Math.random(); startPlacing(o);
 };
 function drawLoot(time, v) {
@@ -2053,6 +2054,66 @@ function drawLoot(time, v) {
     drawEmoji(c, '🎁', g.x, g.y - hop, gs);
   }
 }
+
+// ---------- powers: every set unlocks a one-tap ability for the whole yard ----------
+// Finishing a set earns its reward decoration; placing that decoration in a yard switches the power on there.
+// Powers recharge in 3 hours, or instantly by spending a spare duplicate find from that set.
+const POWER_RECHARGE = 3 * 3600e3;
+const POWERS = {
+  beach: { icon: '🧹', name: 'Tidy Tide', desc: 'Scoops every poop, washes muddy turtles and fills the water.', run() {
+    const n = poops.length; poops.forEach(q => emit(q.x, q.y, 'sparkle', 4)); poops = [];
+    for (const t of turtles) if (t.mud > 0) { t.mud = 0; emit(t.x, t.y, 'drop', 6); }
+    bowl.level = 1; bowl.fill = 1;
+    if (n) job('scoop', null, n);
+    return n ? `Sparkling clean! ${n} mess${n > 1 ? 'es' : ''} gone` : 'Everything sparkles!';
+  } },
+  nature: { icon: '🍽️', name: 'Forest Feast', desc: 'Fills every turtle right up.', run() {
+    for (const t of turtles) { t.st.hunger = 100; t.st.happy = clamp(t.st.happy + 5, 0, 100); emit(t.x, t.y, 'crumb', 8); }
+    return 'A feast for everyone!';
+  } },
+  flowers: { icon: '💚', name: 'Happy Bloom', desc: 'Everyone happy, and nobody lonely.', run() {
+    for (const t of turtles) { t.st.happy = 100; t.st.social = 100; emit(t.x, t.y - t.S, 'heart', 3); }
+    return 'Love is in the air!';
+  } },
+  critters: { icon: '🌙', name: 'Lullaby', desc: 'Everyone rested and toasty warm.', run() {
+    for (const t of turtles) { t.st.energy = 100; t.st.warm = 100; emit(t.x, t.y - t.S, 'note', 2); }
+    return 'Everyone feels rested!';
+  } },
+  gems: { icon: '⭐', name: 'Star Shower', desc: 'Double stars from everything for 10 minutes.', run() {
+    loot.boostUntil = Date.now() + 10 * 60e3;
+    return 'Double stars for 10 minutes!';
+  } },
+  toys: { icon: '🔍', name: 'Treasure Sense', desc: 'A new treasure appears right now.', run() {
+    dropTreasure({ x: clamp(cam.x + rand(-120, 120), 60, YW - 60), y: clamp(cam.y + rand(-120, 120), 60, YH - 60) });
+    return 'A treasure appeared nearby! ✨';
+  } },
+};
+const setFinds = k => SETS.find(s => s.k === k).items.filter(([id]) => loot.found[id]).length;
+const rewardOf = k => SETS.find(s => s.k === k).reward;
+const powerOfDeco = type => SETS.find(s => s.reward === type)?.k;
+const powerHere = k => objs.some(o => o.kind === 'deco' && o.type === rewardOf(k)); // its decoration is in this yard
+const powerCooldown = () => POWER_RECHARGE;
+const powerLeft = k => Math.max(0, (loot.powers[k] || 0) + powerCooldown(k) - Date.now()); // ms until ready
+const spares = k => SETS.find(s => s.k === k).items.reduce((a, [id]) => a + Math.max(0, (loot.found[id] || 0) - 1), 0);
+function usePower(k) {
+  const P = POWERS[k];
+  if (powerLeft(k) > 0) {
+    const left = fmtTime(powerLeft(k) / 1000), sp = spares(k);
+    if (!sp) return say(`${P.icon} ${P.name} recharges in ${left}. Spare duplicate finds can recharge it instantly`, 3500);
+    return askConfirm(`${P.icon} Recharge ${P.name}?`, `It's ready in ${left}. Use one of your ${sp} spare duplicate find${sp > 1 ? 's' : ''} to recharge it now?`, '✨ Recharge', () => {
+      const set = SETS.find(s => s.k === k), id = set.items.map(([i]) => i).filter(i => (loot.found[i] || 0) > 1).sort((a, b) => ITEMS[a].rar - ITEMS[b].rar)[0]; // spend the commonest spare
+      if (!id) return;
+      loot.found[id]--; loot.powers[k] = 0; save(); renderPowers(); renderPills();
+      say(`✨ ${P.name} is ready! (used a spare ${ITEMS[id].icon} ${ITEMS[id].name})`, 3000); snd.play('job');
+    });
+  }
+  loot.powers[k] = Date.now();
+  const msg = P.run();
+  emit(cam.x, cam.y, 'sparkle', 24); snd.play('gift'); buzz([20, 40, 20]);
+  say(`${P.icon} ${P.name}! ${msg}`, 3000);
+  save(); renderPowers();
+}
+function renderPowers() { } // charge is drawn on each set decoration in the yard (see drawDeco)
 
 // ---------- daily jobs: three small tasks a day for bonus stars ----------
 const JOBS = [
@@ -2354,7 +2415,8 @@ function openBook() {
   bookEl.querySelector('.sets').innerHTML = SETS.map(s => {
     const have = s.items.filter(([i]) => loot.found[i]).length, d = DECOS[s.reward], done = loot.sets.includes(s.k);
     return `<div class="set"><div class="hd"><span>${s.name}</span><span>${have}/${s.items.length}</span></div>`
-      + `<div class="rw ${done ? 'got' : ''}">${done ? `✓ Unlocked the ${d.icon} ${d.name}` : `Finish the set to unlock the ${d.icon} ${d.name}`}</div><div class="tiles">`
+      + `<div class="rw ${done ? 'got' : ''}">${done ? `✓ Unlocked the ${d.icon} ${d.name}` : `Finish the set to unlock the ${d.icon} ${d.name}`}</div>`
+      + `<div class="pw">${POWERS[s.k].icon} <b>${POWERS[s.k].name}</b>: ${POWERS[s.k].desc} ${done ? `Place the ${d.name} in a yard to use it there (recharges every 3 h).` : `The ${d.name} gives you this power.`}</div><div class="tiles">`
       + s.items.map(([id, icon, name]) => loot.found[id]
         ? `<button class="tile" data-id="${id}"><span class="e">${icon}</span><small>${name}</small></button>`
         : `<button class="tile no" data-id="${id}"><span class="e">${icon}</span><small>???</small></button>`).join('')
@@ -2408,6 +2470,20 @@ function drawDeco(o, time, dk) {
   }
   if (DECOS[o.type]?.emoji) { // collection rewards: a big emoji standing in the yard
     c.fillStyle = '#0003'; c.beginPath(); c.ellipse(x + 3, y + 4, 22, 9, 0, 0, 7); c.fill();
+    const pk = powerOfDeco(o.type);
+    if (pk) { // its power's charge: a ring that fills gold, then glows when it's ready to tap
+      const left = powerLeft(pk), cy = y - 22, R = 34;
+      if (!left) {
+        const pu = 0.5 + 0.5 * Math.sin(time * 3), gl = c.createRadialGradient(x, cy, 10, x, cy, R + 14);
+        gl.addColorStop(0, `rgba(190,255,150,${0.35 + 0.25 * pu})`); gl.addColorStop(1, 'rgba(190,255,150,0)');
+        c.fillStyle = gl; c.beginPath(); c.arc(x, cy, R + 14, 0, 7); c.fill();
+      }
+      c.lineCap = 'round'; c.lineWidth = 5;
+      c.strokeStyle = '#0003'; c.beginPath(); c.arc(x, cy, R, 0, 7); c.stroke();
+      c.strokeStyle = left ? '#ffd84a' : '#8fe06a';
+      c.beginPath(); c.arc(x, cy, R, -Math.PI / 2, -Math.PI / 2 + (1 - left / POWER_RECHARGE) * Math.PI * 2); c.stroke();
+      if (pk === 'gems' && loot.boostUntil > Date.now()) drawText(c, textSprite(`⭐×2 · ${Math.ceil((loot.boostUntil - Date.now()) / 60e3)} min`, 'bold 11px system-ui', '#ffe27a', '#000a', 3), x, cy - R - 12);
+    }
     drawEmoji(c, DECOS[o.type].icon, x, y - 22, 52); return;
   }
   if (o.type === 'flowers') {
@@ -2784,6 +2860,7 @@ toybar.addEventListener('click', e => {
 
 // ---------- stars ----------
 function earn(n, x, y) {
+  if (Date.now() < loot.boostUntil) n *= 2; // Star Shower
   stars += n; snd.play('star');
   parts.push({ x, y, kind: 'star', text: `+${n}⭐`, t: 0, life: 1.3, vx: 0, vy: -28 });
   starsEl.classList.remove('bump'); void starsEl.offsetWidth; starsEl.classList.add('bump');
@@ -2905,12 +2982,17 @@ function tap(p) {
   emit(p.x, p.y, 'tap');
   if (placing) {
     placing.x = p.x; placing.y = p.y; keepInYard(placing);
-    emit(placing.x, placing.y, 'sparkle', 10); say(`${nameOf(placing)} placed ✨`); buzz(15);
+    const pk = placing.kind === 'deco' && powerOfDeco(placing.type);
+    emit(placing.x, placing.y, 'sparkle', 10); buzz(15);
+    say(pk ? `${nameOf(placing)} placed! Tap it to use its power ${POWERS[pk].icon} ${POWERS[pk].name} (works in this yard)` : `${nameOf(placing)} placed ✨`, pk ? 4500 : 1800);
+    if (pk) setTimeout(renderPowers, 50);
     placing = null; save();
     return;
   }
   if (arranging) return;
   const grab = Math.max(30, 22 / cam.z); // easy to tap even when zoomed out
+  const magic = objs.find(o => o.kind === 'deco' && powerOfDeco(o.type) && dist(o, { x: p.x, y: p.y + 20 }) < Math.max(34, 26 / cam.z));
+  if (magic) return usePower(powerOfDeco(magic.type)); // tap a set decoration to use its power
   const tr = loot.treasures.find(t => dist(t, p) < grab);
   if (tr) return collectTreasure(tr);
   if (loot.gift && dist(loot.gift, p) < grab + 6) return openGift();
