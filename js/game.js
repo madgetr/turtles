@@ -425,7 +425,7 @@ function goalFor() {
       const p = { x: pond.x + Math.cos(a) * POND.rx * 0.8, y: pond.y + Math.sin(a) * POND.ry * 0.8 };
       return { p, reach: 12, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = pond; } };
     }
-    if (bowl.level > 0.08) return { p: bowl, reach: bowl.r + 4, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = bowl; } };
+    if (bowl.level > 0.08) return { p: bowl, reach: bowl.r + 4, bodyReach: bowl.r + S * 0.9 + 6, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = bowl; } }; // bumping the rim is close enough
   }
   if (ball && st.hunger > 15 && st.thirst > 15 && (T.traits.playful > 0.3 || st.happy < 40)) { // lazy turtles only play when they're down
     return { p: ball, reach: 14 + ball.r, by: 'mouth', arrive: nudgeBall, keepGoing: true };
@@ -533,6 +533,7 @@ function think(dt) {
     T.drinkT -= dt;
     const fromBowl = T.drinkFrom !== objOf('pond');
     T.lookAt = fromBowl ? bowl : null;
+    if (fromBowl) T.a += angDiff(T.a, Math.atan2(bowl.y - T.y, bowl.x - T.x)) * Math.min(1, dt * 3); // face the water
     T.headExt = 1 + Math.sin(T.drinkT * 9) * 0.1;
     if (Math.random() < dt * 4) emit(mouth().x, mouth().y, 'ripple');
     st.thirst = clamp(st.thirst + dt * 16, 0, 100);
@@ -558,8 +559,11 @@ function think(dt) {
     if (g) {
       const from = g.by === 'mouth' ? mouth() : T;
       const d = dist(from, g.p);
-      if (d < g.reach) { g.arrive(); if (g.keepGoing) want = 25; }
-      else {
+      if (d < g.reach || (g.bodyReach && dist(T, g.p) < g.bodyReach)) { g.arrive(); if (g.keepGoing) want = 25; }
+      else if (g.by === 'mouth' && !g.bodyReach && (dist(T, g.p) < S * 1.3 || (T.backFrom === g.p && dist(T, g.p) < S * 2.1))) {
+        T.backFrom = g.p; desiredA = T.a; want = -16 * (0.6 + 0.4 * S / 34); // it's under the belly: back up until it's well in front
+      } else {
+        T.backFrom = null;
         desiredA = Math.atan2(g.p.y - T.y, g.p.x - T.x);
         const turn = Math.abs(angDiff(T.a, desiredA));
         want = (g.slow ? 32 : 48) * (0.55 + 0.45 * S / 34) * clamp(d / (S * 2), 0.35, 1) * (turn > 1.0 ? 0.15 : 1);
@@ -585,7 +589,7 @@ function think(dt) {
   if (st.health < SICK) want *= st.health < 8 ? 0.15 : 0.5;
   // steering
   const turnRate = (1.7 + (T.v < 10 ? 0.6 : 0)) * lerp(0.8, 1.25, T.traits.speed);
-  if (want > 0) T.a += clamp(angDiff(T.a, desiredA), -turnRate * dt, turnRate * dt);
+  if (want !== 0) T.a += clamp(angDiff(T.a, desiredA), -turnRate * dt, turnRate * dt);
   T.v = lerp(T.v, want, dt * (want > T.v ? 2.2 : 5));
   T.x += Math.cos(T.a) * T.v * dt; T.y += Math.sin(T.a) * T.v * dt;
   // keep out of the bowl and feeder, and inside the yard
@@ -1903,13 +1907,13 @@ function frame(now) {
   for (const o of objs) if (o.kind === 'deco' && !DECOS[o.type].tall && inView(o, 40, v)) drawDeco(o, time, dk);
   for (const p of poops) if (inView(p, 30, v)) drawPoop(p, time);
   for (const f of foods) if (inView(f, 30, v)) drawFoodItem(f);
+  if (inView(bowl, bowl.r + 10, v)) drawBowl(time); // low to the ground: turtles always walk over it
   drawMarker(time);
   // turtles, crabs, toy, bowl, feeder, mirror and tall decorations back-to-front so overlaps look right
-  const order = [...turtles.filter(t => !t.off), bowl, ...(feeder ? [feeder] : []), ...(ball ? [ball] : []), ...(mirror ? [mirror] : []),
+  const order = [...turtles.filter(t => !t.off), ...(feeder ? [feeder] : []), ...(ball ? [ball] : []), ...(mirror ? [mirror] : []),
     ...crabs.filter(c => inView(c, 20, v)), ...objs.filter(o => o.kind === 'deco' && DECOS[o.type].tall && inView(o, 50, v))].sort((a, b) => a.y - b.y);
   for (const o of order) {
     if (o === ball) drawBall();
-    else if (o === bowl) drawBowl(time);
     else if (o === feeder) drawFeeder(o, time);
     else if (o === mirror) drawMirror(o, time);
     else if (o.crab) drawCrab(o);
