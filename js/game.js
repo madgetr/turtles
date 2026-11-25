@@ -126,6 +126,8 @@ let flies = [];   // fireflies at night
 let arranging = false, hourOverride = null;
 const POND = { rx: 120, ry: 78 }, LOG = { len: 150, r: 40 }, HUT = { r: 54 }, FEEDER_R = 26;
 let up = { yard: 0, bowl: 0, feeder: 0, toys: ['ball'], toy: 'ball', crab: 0, vet: 0, garden: 0, size: {}, birds: 0, lily: 0, bugs: 0 };
+const UP0 = JSON.parse(JSON.stringify(up)); // a brand-new yard's upgrades
+const SHARED_UP = ['toys', 'toy', 'vet']; // owned once, used in every yard
 let objs = []; // placed things: { kind: 'feeder' | 'rock' | 'log' | 'hut' | 'pond', x, y }
 let stars = 0, lastDaily = '', base = null, feederT = 0, waterStarCool = 0;
 let YW = 400, YH = 600;
@@ -173,7 +175,7 @@ const NAMES = [
 ];
 // a random name nobody in the yard has yet (falls back to 'Turtle 7' style if all are taken)
 function randomName() {
-  const used = new Set(turtles.map(t => t.name)), free = NAMES.filter(n => !used.has(n));
+  const used = new Set([...turtles.map(t => t.name), ...yards.flatMap((y, i) => (i === yardIdx || !y ? [] : y.turtles.map(t => t.name)))]), free = NAMES.filter(n => !used.has(n));
   if (free.length) return free[Math.floor(Math.random() * free.length)];
   let i = turtles.length + 1; while (used.has(`Turtle ${i}`)) i++;
   return `Turtle ${i}`;
@@ -371,20 +373,58 @@ function drawYard(v) {
 }
 
 // ---------- persistence ----------
-const SAVE = 'turtle-save-v2', OLD_SAVE = 'turtle-save-v1';
-const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud', 'chub', 'diet', 'born'];
-function save() {
-  localStorage.setItem(SAVE, JSON.stringify({
-    turtles: turtles.filter(t => t.releasing === undefined).map(t => Object.fromEntries(KEEP.map(k => [k, t[k]]))),
-    sel: turtles.indexOf(sel), poops, level: bowl.level, t: Date.now(),
+// v3 keeps several yards. The yard on screen lives in the usual globals; the others are stored packed.
+// Older saves (v2, v1) are read once and become "My Yard"; the v2 save is left untouched as a backup.
+const SAVE3 = 'turtle-save-v3', SAVE = 'turtle-save-v2', OLD_SAVE = 'turtle-save-v1';
+const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud', 'chub', 'diet', 'born', 'arrived'];
+let yards = [null], yardIdx = 0, yardName = 'My Yard';
+const packTurtle = t => Object.fromEntries(KEEP.map(k => [k, t[k]]));
+function packYard() {
+  return {
+    name: yardName, t: Date.now(),
+    turtles: turtles.filter(t => t.releasing === undefined).map(packTurtle), sel: Math.max(0, turtles.indexOf(sel)),
+    poops, level: bowl.level,
     foods: foods.map(({ x, y, type, bites, max, rot, fromFeeder, slot }) => ({ x, y, type, bites, max, rot, fromFeeder, slot })),
-    world: true, base, up, objs: objs.map(({ kind, type, seed, x, y }) => ({ kind, type, seed, x, y })), plots, bowlPos: { x: bowl.x, y: bowl.y },
-    stars, lastDaily, loot, cam: { x: cam.x, y: cam.y, z: cam.z },
+    up: Object.fromEntries(Object.entries(up).filter(([k]) => !SHARED_UP.includes(k))),
+    objs: objs.map(({ kind, type, seed, x, y }) => ({ kind, type, seed, x, y })), plots,
+    bowlPos: { x: bowl.x, y: bowl.y }, cam: { x: cam.x, y: cam.y, z: cam.z },
+  };
+}
+function setYardState(y) { // put a packed yard into the globals (no layout yet: call applyYard after)
+  yardName = y.name || 'My Yard';
+  poops = y.poops || []; bowl.level = y.level ?? 1; foods = y.foods || [];
+  turtles = (y.turtles || []).map(o => makeTurtle({ ...o, gut: o.gut || [] }));
+  sel = turtles[y.sel] || turtles[0];
+  const shared = Object.fromEntries(SHARED_UP.map(k => [k, up[k]]));
+  up = { ...JSON.parse(JSON.stringify(UP0)), ...(y.up || {}), ...shared }; up.size = { ...(up.size || {}) };
+  objs = (y.objs || []).map(o => (o.kind === 'tree' ? { kind: 'deco', type: 'tree', seed: o.seed ?? Math.random(), x: o.x, y: o.y } : o));
+  plots = y.plots || [];
+  if (y.bowlPos) Object.assign(bowl, y.bowlPos); else if (base) { bowl.x = base.w - 60; bowl.y = 58; }
+  if (y.cam) Object.assign(cam, y.cam);
+}
+function save() {
+  yards[yardIdx] = packYard();
+  localStorage.setItem(SAVE3, JSON.stringify({
+    v: 3, yards, active: yardIdx, base, t: Date.now(),
+    shared: { stars, lastDaily, loot, ...Object.fromEntries(SHARED_UP.map(k => [k, up[k]])) },
   }));
 }
 // Loads the save. Returns { away (seconds), fresh, legacy (old screen coordinates), newStars }.
 function load() {
-  let d = null;
+  let d3 = null;
+  try { d3 = JSON.parse(localStorage.getItem(SAVE3)); } catch { }
+  if (d3?.yards?.length) {
+    const sh = d3.shared || {};
+    base = d3.base || null; stars = sh.stars ?? 30; lastDaily = sh.lastDaily || '';
+    loot = { ...loot, ...(sh.loot || {}) };
+    for (const k of SHARED_UP) if (sh[k] !== undefined) up[k] = sh[k];
+    yards = d3.yards; yardIdx = clamp(d3.active | 0, 0, yards.length - 1);
+    const y = yards[yardIdx];
+    setYardState(y);
+    if (!turtles.length) { turtles = [makeTurtle()]; sel = turtles[0]; }
+    return { away: clamp((Date.now() - (y.t || Date.now())) / 1000, 0, 7 * 86400), hadBowl: !!y.bowlPos };
+  }
+  let d = null; // no v3 yet: upgrade from the single-yard save
   try { d = JSON.parse(localStorage.getItem(SAVE)); } catch { }
   if (!d) { // migrate the single-turtle save
     try {
@@ -443,6 +483,7 @@ function simulateAway(secs) {
     }
     for (const r of rep) {
       const t = r.t, s = t.st;
+      if (t.arrived && simNow < t.arrived) continue; // moved here later: this part of the gap wasn't theirs
       s.hunger = clamp(s.hunger - dt * AWAY.hunger * lerp(0.85, 1.2, t.traits.appetite) * (lamp ? 0.9 : 1), 0, 100);
       s.thirst = clamp(s.thirst - dt * AWAY.thirst, 0, 100);
       if (s.thirst < 55 && pond) { s.thirst = 100; r.drank++; r.pond = true; } // all-you-can-drink pond
@@ -495,7 +536,7 @@ function simulateAway(secs) {
 }
 
 const fmtTime = s => s < 3600 ? `${Math.round(s / 60)} min` : s < 86400 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : `${Math.floor(s / 86400)} d ${Math.floor(s % 86400 / 3600)} h`;
-function showAway(report) {
+function showAway(report, where) {
   const box = document.getElementById('away');
   const lines = [];
   for (const r of report.rep) {
@@ -520,7 +561,7 @@ function showAway(report) {
   if (report.cleaned) extra.push(`🦀 The crab${up.crab > 1 ? 's' : ''} cleaned up ${report.cleaned} mess${report.cleaned > 1 ? 'es' : ''}.`);
   if (report.fed) extra.push(`🥫 The feeder dropped ${report.fed} snack${report.fed > 1 ? 's' : ''}.`);
   if (poops.length) extra.push(`🧹 ${poops.length} mess${poops.length > 1 ? 'es' : ''} to clean up.`);
-  box.querySelector('.body').innerHTML = `<div class="when">You were away ${fmtTime(report.secs)}</div>` + lines.join('<hr>') + (extra.length ? '<hr>' + extra.join('<br>') : '');
+  box.querySelector('.body').innerHTML = `<div class="when">${where ? `${esc(where)}: last visited ${fmtTime(report.secs)} ago` : `You were away ${fmtTime(report.secs)}`}</div>` + lines.join('<hr>') + (extra.length ? '<hr>' + extra.join('<br>') : '');
   box.hidden = false;
 }
 
@@ -1941,6 +1982,96 @@ function job(k, who = null, amount = 1) {
   renderPills();
 }
 
+// ---------- multiple yards ----------
+const MAX_YARDS = 5, YARD_COSTS = [1500, 4000, 8000, 15000];
+const yardCost = () => YARD_COSTS[yards.length - 1];
+function resetYardRuntime() { // things that only make sense in the yard you were just in
+  endArrange();
+  ball = null; crabs = []; bugs = []; frogs = []; birds = []; ladybugs = []; flies = []; parts = [];
+  placing = null; marker = null; camFollow = null; feederT = 0;
+}
+function switchYard(j) {
+  if (j === yardIdx || !yards[j]) return;
+  yards[yardIdx] = packYard();
+  yardIdx = j;
+  const y = yards[j];
+  setYardState(y); resetYardRuntime(); applyYard(); clampCam();
+  syncCrabs(); ensurePlots();
+  for (const p of [...loot.treasures, ...(loot.gift ? [loot.gift] : [])]) keepInYard(p); // finds and gifts travel with you
+  for (const t of turtles) { use(t); resetFeet(); }
+  use(sel);
+  graceT = GRACE_SECS;
+  const secs = clamp((Date.now() - (y.t || Date.now())) / 1000, 0, 7 * 86400);
+  if (secs > 90) showAway(simulateAway(secs), yardName);
+  save(); renderPills();
+  say(`🏡 Welcome to ${yardName}`, 2200);
+}
+function buildYard() {
+  const n = yards.length + 1;
+  const W0 = base.w, H0 = base.h, h = makeTurtle({ growth: 0, x: W0 / 2, y: H0 / 2, a: rand(-3, 3) });
+  yards[yardIdx] = packYard();
+  yards.push({ name: `Yard ${n}`, t: Date.now(), turtles: [packTurtle(h)], sel: 0, poops: [], level: 1, foods: [], up: {}, objs: [], plots: [],
+    bowlPos: { x: W0 - 60, y: 58 }, cam: { x: W0 / 2, y: H0 / 2, z: 1 } });
+  const j = yards.length - 1;
+  shop.hidden = true;
+  askName('Name your new yard 🏞️', `Yard ${n}`, name => {
+    yards[j].name = name;
+    switchYard(j);
+    say(`🏞️ ${name} is ready, with a new hatchling, ${h.name}! Move turtles here from their ⋯ menu`, 4500);
+  }, 24);
+}
+function moveTurtle(t, j) {
+  const y = yards[j];
+  if (!y || j === yardIdx || turtles.length < 2) return;
+  const W = base.w * YARDS[y.up?.yard || 0].m, H = base.h * YARDS[y.up?.yard || 0].m;
+  const p = packTurtle(t);
+  p.x = W / 2 + rand(-60, 60); p.y = H / 2 + rand(-60, 60); p.arrived = Date.now();
+  y.turtles.push(p);
+  turtles = turtles.filter(x => x !== t);
+  if (sel === t || !turtles.includes(sel)) sel = turtles[0];
+  use(sel); save(); renderPills();
+  say(`🚚 ${t.name} moved to ${y.name}`, 3000); snd.play('hatch');
+}
+const yardsEl = document.getElementById('yards'), yardsBtn = document.getElementById('yards-btn');
+function yardSummary(i) { // turtle count and any problems, for the live yard or a stored one
+  const list = i === yardIdx ? turtles.filter(t => t.releasing === undefined) : yards[i].turtles;
+  const sick = list.filter(t => t.st.health < SICK).length, needy = list.filter(t => t.st.hunger < 30 || t.st.thirst < 30).length;
+  const ago = i === yardIdx ? 0 : (Date.now() - yards[i].t) / 1000;
+  const st = sick ? '🤒' : needy ? '🥬' : ago > 86400 ? '👀' : '😊';
+  const info = `🐢 ${list.length} turtle${list.length === 1 ? '' : 's'}` + (i === yardIdx ? ' · 📍 you are here' : ago > 120 ? ` · visited ${fmtTime(ago)} ago` : '');
+  return { name: i === yardIdx ? yardName : yards[i].name, count: list.length, fits: Math.min(MAX_TURTLES, YARDS[(i === yardIdx ? up : yards[i].up || {}).yard || 0].fits), st, info };
+}
+let movingTurtle = null;
+function openYards(moving = null) {
+  movingTurtle = moving;
+  yardsEl.querySelector('h2').textContent = moving ? `🚚 Move ${moving.name} to…` : '🏡 Your yards';
+  yardsEl.querySelector('.sub').textContent = moving ? 'Pick a yard with room' : (yards.length > 1 ? 'Tap a yard to visit it' : 'Build another yard in the shop, then move turtles between them');
+  yardsEl.querySelector('.list').innerHTML = yards.map((_, i) => {
+    const s = yardSummary(i), full = s.count >= s.fits;
+    if (moving && i === yardIdx) return '';
+    return `<button class="yd ${i === yardIdx ? 'here' : ''}" data-i="${i}" ${moving && full ? 'disabled' : ''}><b>${esc(s.name)}</b><span class="st">${moving && full ? 'Full' : s.st}</span><small>${s.info}</small></button>`;
+  }).join('');
+  yardsEl.querySelector('.acts').innerHTML = moving ? '' : `<button class="rename">✏️ Rename ${esc(yardName)}</button>`
+    + (yards.length < MAX_YARDS ? `<button class="buy" ${stars < yardCost() ? 'disabled' : ''}>🏞️ Build another yard · ⭐ ${yardCost()}</button>` : '');
+  yardsEl.hidden = false;
+}
+yardsEl.querySelector('.list').addEventListener('click', e => {
+  const b = e.target.closest('.yd'); if (!b || b.disabled) return;
+  const j = +b.dataset.i;
+  yardsEl.hidden = true;
+  if (movingTurtle) { const t = movingTurtle; movingTurtle = null; return moveTurtle(t, j); }
+  switchYard(j);
+});
+yardsEl.querySelector('.acts').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  yardsEl.hidden = true;
+  if (b.classList.contains('rename')) return askName('Rename this yard', yardName, n => { yardName = n; save(); renderPills(); }, 24);
+  if (b.classList.contains('buy') && stars >= yardCost()) { stars -= yardCost(); snd.play('buy'); buildYard(); }
+});
+yardsEl.querySelector('.close').onclick = () => { yardsEl.hidden = true; movingTurtle = null; };
+yardsEl.addEventListener('click', e => { if (e.target === yardsEl) { yardsEl.hidden = true; movingTurtle = null; } });
+yardsBtn.onclick = () => openYards();
+
 // ---------- book + jobs sheets ----------
 const bookEl = document.getElementById('book'), jobsEl = document.getElementById('jobs');
 const bookBtn = document.getElementById('book-btn'), jobsBtn = document.getElementById('jobs-btn');
@@ -1950,6 +2081,7 @@ function renderPills() {
   const L = loot.jobs?.list || [], done = L.filter(j => j.have >= j.n).length;
   jobsBtn.textContent = `📋 ${done}/${L.length}`;
   jobsBtn.classList.toggle('ready', L.length > 0 && done === L.length);
+  yardsBtn.textContent = yards.length > 1 ? `🏡 ${yardIdx + 1}/${yards.length}` : '🏡';
 }
 function openBook() {
   const n = Object.keys(loot.found).length;
@@ -2589,9 +2721,9 @@ function adopt() {
 // done(name) runs with the typed name (left blank = keep the current one).
 const namer = document.getElementById('namer'), namerIn = namer.querySelector('input');
 let namerDone = null;
-function askName(title, current, done) {
+function askName(title, current, done, max = 14) {
   namer.querySelector('.title').textContent = title;
-  namerIn.value = current; namerDone = n => done((n || '').trim().slice(0, 14) || current);
+  namerIn.maxLength = max; namerIn.value = current; namerDone = n => done((n || '').trim().slice(0, max) || current);
   namer.hidden = false;
   setTimeout(() => { namerIn.focus(); namerIn.select(); }, 50);
 }
@@ -2618,6 +2750,7 @@ stageEl.addEventListener('click', () => {
     return `<div>${d.icon} ${d.label}</div><div class="dots">${'●'.repeat(n)}<span>${'●'.repeat(5 - n)}</span></div>`;
   }).join('');
   document.getElementById('m-release').disabled = turtles.length < 2;
+  document.getElementById('m-move').hidden = yards.length < 2;
   const vb = document.getElementById('m-vet');
   vb.hidden = !up.vet; vb.textContent = `💊 Use vet kit (${up.vet} left)`;
   menu.hidden = false;
@@ -2643,7 +2776,7 @@ function statusIcons(t) {
 }
 function openRoster() {
   const live = turtles.filter(t => t.releasing === undefined);
-  roster.querySelector('.title').textContent = `🐢 Your turtles (${live.length})`;
+  roster.querySelector('.title').textContent = `🐢 ${yards.length > 1 ? yardName : 'Your turtles'} (${live.length})`;
   roster.querySelector('.list').innerHTML = live.map(t => {
     const s = t.st, well = (s.health + s.hunger + s.thirst + s.happy) / 4;
     const col = well < 30 ? '#ef6a5a' : well < 55 ? '#f2c14e' : '#8fd16a';
@@ -2666,6 +2799,11 @@ document.getElementById('m-rename').onclick = () => {
   menu.hidden = true;
   const t = sel;
   askName(`Rename ${t.name}`, t.name, n => { t.name = n; save(); });
+};
+document.getElementById('m-move').onclick = () => {
+  menu.hidden = true;
+  if (turtles.length < 2) return say('A yard needs at least one turtle. Adopt another one first!', 3000);
+  openYards(sel);
 };
 document.getElementById('m-vet').onclick = () => { menu.hidden = true; if (up.vet > 0) useVet(sel, false); };
 document.getElementById('m-release').onclick = () => {
@@ -2698,6 +2836,7 @@ function buildShop() {
   rows.push(yNext
     ? { icon: '🏡', name: `${yNext.name} yard`, desc: `More room to roam, and space for ${yNext.fits} turtles.`, cost: yNext.cost, buy: () => { up.yard++; applyYard(); say('Bigger yard! Drag to look around · pinch to zoom', 3500); } }
     : { icon: '🏡', name: `${YARDS[up.yard].name} yard`, desc: 'The biggest yard there is.', done: 'Maxed' });
+  if (yards.length < MAX_YARDS) rows.push({ icon: '🏞️', name: 'Build another yard', desc: `A brand-new yard with its own upgrades, and a free hatchling to start it. You have ${yards.length}.`, cost: yardCost(), buy: buildYard });
   rows.push({ icon: '✋', name: 'Arrange yard', desc: 'Drag things to new spots. Tap a decoration to remove it.', action: startArrange, btn: 'Arrange' });
   rows.push({ sec: '🤖 Care & automation' });
   rows.push(bNext
@@ -2965,5 +3104,5 @@ document.addEventListener('visibilitychange', () => {
   hiddenAt = null; last = performance.now();
   if (away > 90) { graceT = GRACE_SECS; showAway(simulateAway(away)); dailyBonus(); save(); }
 });
-window.turtle = { get turtles() { return turtles; }, get sel() { return sel; }, get ball() { return ball; }, get foods() { return foods; }, get poops() { return poops; }, bowl, grow: a => { use(sel); grow(a); }, simulateAway: secs => showAway(simulateAway(secs)), endGrace: () => { graceT = 0; }, addStars: n => { stars += n; }, cam, get up() { return up; }, get objs() { return objs; }, get crabs() { return crabs; }, get plots() { return plots; }, setHour: h => { hourOverride = h; } };
+window.turtle = { get turtles() { return turtles; }, get sel() { return sel; }, get ball() { return ball; }, get foods() { return foods; }, get poops() { return poops; }, bowl, grow: a => { use(sel); grow(a); }, simulateAway: secs => showAway(simulateAway(secs)), endGrace: () => { graceT = 0; }, addStars: n => { stars += n; }, cam, get up() { return up; }, get objs() { return objs; }, get crabs() { return crabs; }, get plots() { return plots; }, setHour: h => { hourOverride = h; }, get yards() { return yards; }, get yardIdx() { return yardIdx; }, switchYard: i => switchYard(i) };
 requestAnimationFrame(frame);
