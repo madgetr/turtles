@@ -75,6 +75,12 @@ const DECOS = {
   stones: { name: 'Stepping stones', icon: '🪨', cost: 12 },
   bush: { name: 'Bush', icon: '🌿', cost: 15, tall: true },
   lantern: { name: 'Lantern', icon: '🏮', cost: 25, tall: true, light: true },
+  castle: { name: 'Sandcastle', icon: '🏰', emoji: true, reward: true, tall: true },
+  crystal: { name: 'Glowing crystal', icon: '💎', emoji: true, reward: true, tall: true, light: true },
+  statue: { name: 'Stone statue', icon: '🗿', emoji: true, reward: true, tall: true },
+  wishtree: { name: 'Wishing tree', icon: '🎋', emoji: true, reward: true, tall: true },
+  frogstatue: { name: 'Frog statue', icon: '🐸', emoji: true, reward: true, tall: true },
+  flag: { name: 'Pirate flag', icon: '🏴‍☠️', emoji: true, reward: true, tall: true },
   tree: { name: 'Shade tree', icon: '🌳', cost: 150, step: 75, canopy: true, desc: 'Turtles nap in its shade on sunny days. Every tree grows a little differently.' },
 };
 // Each tree's size and look come from its seed: 85-130% of TREE_R, its own greens, some in blossom or fruit.
@@ -363,7 +369,7 @@ function save() {
     sel: turtles.indexOf(sel), poops, level: bowl.level, t: Date.now(),
     foods: foods.map(({ x, y, type, bites, max, rot, fromFeeder, slot }) => ({ x, y, type, bites, max, rot, fromFeeder, slot })),
     world: true, base, up, objs: objs.map(({ kind, type, seed, x, y }) => ({ kind, type, seed, x, y })), plots, bowlPos: { x: bowl.x, y: bowl.y },
-    stars, lastDaily, cam: { x: cam.x, y: cam.y, z: cam.z },
+    stars, lastDaily, loot, cam: { x: cam.x, y: cam.y, z: cam.z },
   }));
 }
 // Loads the save. Returns { away (seconds), fresh, legacy (old screen coordinates), newStars }.
@@ -382,6 +388,7 @@ function load() {
   sel = turtles[d.sel] || turtles[0];
   base = d.base || null; up = { ...up, ...(d.up || {}) }; up.size = { ...(up.size || {}) }; objs = (d.objs || []).map(o => (o.kind === 'tree' ? { kind: 'deco', type: 'tree', seed: o.seed ?? Math.random(), x: o.x, y: o.y } : o)); plots = d.plots || [];
   stars = d.stars ?? 30; lastDaily = d.lastDaily || '';
+  loot = { ...loot, ...(d.loot || {}) };
   if (d.bowlPos) Object.assign(bowl, d.bowlPos);
   if (d.cam) Object.assign(cam, d.cam);
   return { away: clamp((Date.now() - d.t) / 1000, 0, 7 * 86400), legacy: !d.world, newStars: d.stars === undefined, hadBowl: !!d.bowlPos };
@@ -631,6 +638,7 @@ function nudgeBall() {
   st.happy = clamp(st.happy + joy, 0, 100); T.chub = clamp(T.chub - 0.006, 0, 1); st.energy = clamp(st.energy - 0.5, 0, 100);
   emit(T.x, T.y - S, 'heart');
   if (T.playStarCool <= 0) { earn(1, T.x, T.y - S * 2); T.playStarCool = 4; }
+  job('play');
   buzz(8);
 }
 
@@ -672,6 +680,7 @@ function think(dt) {
       grow(GROW_PER_BITE * (f.type === 'berry' ? 1.3 : 1) * (0.5 + st.happy / 100));
       if (f.bites <= 0) {
         T.diet.push(f.type); if (T.diet.length > 6) T.diet.shift();
+        if (f.type === 'berry') job('berry');
         if (f.type === 'berry') T.chub = clamp(T.chub + 0.05, 0, 1);
         foods = foods.filter(x => x !== f); T.eat = null; T.gut.push(rand(15, 28)); if (f.slot !== undefined && plots[f.slot]) plots[f.slot].t0 = Date.now(); }
     }
@@ -1419,6 +1428,7 @@ function lights() {
   const hr = objOf('heatrock'), fog = objOf('fog');
   if (hr) L.push({ x: hr.x, y: hr.y, r: 150 * sizeK('heatrock'), k: 0.7, warm: true });
   if (fog) L.push({ x: fog.x, y: fog.y, r: FOG_R * 1.1, k: 0.45 });
+  for (const o of objs) if (o.kind === 'deco' && o.type === 'crystal') L.push({ x: o.x, y: o.y - 20, r: 110, k: 0.8 });
   for (const o of objs) if (o.kind === 'deco' && o.type === 'lantern') L.push({ x: o.x, y: o.y, r: 95, k: 0.95, warm: true });
   for (const f of flies) L.push({ x: f.x, y: f.y, r: 18, k: 0.6 * (0.5 + 0.5 * Math.sin(f.ph * 3)) });
   return L;
@@ -1617,6 +1627,7 @@ function updateLife(dt, dk) {
     if (Math.random() < dt * 0.8) b.peck = 0.3;
     if (Math.random() < dt * 0.4) { const a = rand(0, 7); b.to = { x: clamp(b.x + Math.cos(a) * 18, 30, YW - 30), y: clamp(b.y + Math.sin(a) * 18, 30, YH - 30) }; b.face = a; b.x = b.to.x; b.y = b.to.y; }
     if (!day || turtles.some(t => dist(t, b) < t.S + 50) || b.t > 40) { // away!
+      if (day && Math.random() < 0.06 && loot.treasures.length <= MAX_DROPS) dropTreasure({ x: b.x, y: b.y }, 'critters');
       b.fly = true; b.leaving = true; b.to = { x: b.x + (b.x < YW / 2 ? -1 : 1) * 500, y: b.y - 300 };
     }
   }
@@ -1674,10 +1685,237 @@ function drawAirLife(v) {
   for (const b of birds) if (b.fly && inView(b, 30, v)) drawBird(b);
 }
 
+// ---------- loot: treasure drops, collection book, daily gift, daily jobs ----------
+// Treasures turn up in the yard every few hours (up to 3 wait for you while you're away). Each is a find for
+// the collection book; finishing a set unlocks a decoration you can't buy. Nothing is lost by skipping a day.
+const SETS = [
+  { k: 'beach', name: 'Beach finds', reward: 'castle', items: [
+    ['shell', '🐚', 'Spiral shell', 'Sea snails make their shells a little bigger every year.', 1],
+    ['glass', '💠', 'Sea glass', 'Broken glass turns smooth and frosty after years of tumbling in the waves.', 2],
+    ['bottle', '🍾', 'Message in a bottle', 'Some bottles float across whole oceans before washing up.', 3],
+    ['starfish', '⭐', 'Starfish', 'A starfish can grow back a lost arm!', 2],
+    ['pearl', '⚪', 'Pearl', 'Pearls grow inside oysters, layer by layer, around a tiny grain of sand.', 3]] },
+  { k: 'gems', name: 'Sparkly gems', reward: 'crystal', items: [
+    ['gem', '💎', 'Sparkly gem', 'Diamonds are the hardest natural thing on Earth.', 2],
+    ['orb', '🔮', 'Crystal orb', 'Crystals grow slowly as tiny pieces stack up in neat patterns.', 2],
+    ['ring', '💍', 'Lost ring', 'Someone must be missing this! Gold never rusts.', 3],
+    ['crown', '👑', 'Tiny crown', 'Fit for the king or queen of the turtle yard.', 3],
+    ['coins', '💰', 'Coin pouch', 'The oldest coins ever found are over 2,600 years old.', 1]] },
+  { k: 'nature', name: 'Nature treasures', reward: 'statue', items: [
+    ['bone', '🦴', 'Old bone', 'Fossils are bones that slowly turned to stone over millions of years.', 2],
+    ['snail', '🐌', 'Snail shell', 'Painted turtles love snacking on snails. Crunchy!', 1],
+    ['leaf', '🍂', 'Golden leaf', 'Leaves turn gold in autumn when trees stop making their green color.', 1],
+    ['acorn', '🌰', 'Acorn', 'A tiny acorn can grow into a giant oak tree.', 1],
+    ['shroom', '🍄', 'Lucky mushroom', 'Mushrooms aren\'t plants. They\'re fungi!', 2]] },
+  { k: 'flowers', name: 'Flower petals', reward: 'wishtree', items: [
+    ['blossom', '🌸', 'Cherry blossom', 'Cherry trees bloom for only about a week each spring.', 1],
+    ['sunflower', '🌻', 'Sunflower', 'Young sunflowers turn to follow the sun across the sky.', 1],
+    ['rose', '🌹', 'Rose', 'Roses are cousins of apples and strawberries.', 2],
+    ['clover', '🍀', 'Four-leaf clover', 'Only about 1 in 5,000 clovers has four leaves. Lucky!', 3],
+    ['hibiscus', '🌺', 'Hibiscus', 'Lots of turtles love munching hibiscus flowers.', 2]] },
+  { k: 'critters', name: 'Critter friends', reward: 'frogstatue', items: [
+    ['ladybug', '🐞', 'Ladybug', 'Ladybugs eat tiny bugs that hurt plants, so gardeners love them.', 1],
+    ['bee', '🐝', 'Bumblebee', 'Bees do a little dance to tell their friends where the flowers are.', 2],
+    ['caterpillar', '🐛', 'Caterpillar', 'Every caterpillar is a butterfly in training.', 1],
+    ['cricket', '🦗', 'Cricket', 'Crickets chirp by rubbing their wings together.', 2],
+    ['butterfly', '🦋', 'Butterfly wing', 'Butterflies taste with their feet!', 3]] },
+  { k: 'toys', name: 'Lost & found', reward: 'flag', items: [
+    ['dice', '🎲', 'Lucky dice', 'Opposite sides of a dice always add up to 7.', 1],
+    ['teddy', '🧸', 'Teddy bear', 'Teddy bears are named after a US president, Teddy Roosevelt.', 3],
+    ['balloon', '🎈', 'Balloon', 'A balloon rubbed on your hair can stick to a wall.', 1],
+    ['key', '🔑', 'Old key', 'What could it open? Nobody knows…', 2],
+    ['compass', '🧭', 'Compass', 'A compass needle always points north.', 2]] },
+];
+const ITEMS = {};
+for (const s of SETS) for (const [id, icon, name, fact, rar] of s.items) ITEMS[id] = { id, icon, name, fact, rar, set: s.k };
+const RARITY = { 1: 'Common', 2: 'Uncommon', 3: 'Rare' };
+const DROP_EVERY = 3 * 3600e3, MAX_DROPS = 3, MILESTONES = { 7: 50, 30: 200, 100: 500 };
+let loot = { last: 0, treasures: [], found: {}, sets: [], visits: 0, day: '', gift: null, jobs: null };
+let pendingReward = null;
+
+// pick a find: commons are likelier; things you don't have yet get a little boost
+function rollItem(setKey, minRar = 0) {
+  const pool = Object.values(ITEMS).filter(it => (!setKey || it.set === setKey) && it.rar >= minRar);
+  const w = it => ({ 1: 6, 2: 3, 3: 1 }[it.rar]) * (loot.found[it.id] ? 1 : 1.6);
+  let r = Math.random() * pool.reduce((a, it) => a + w(it), 0);
+  for (const it of pool) if ((r -= w(it)) <= 0) return it.id;
+  return pool[0].id;
+}
+function dropTreasure(at, setKey) { // somewhere open in the yard (or right where a bird took off)
+  for (let tries = 0; tries < 25; tries++) {
+    const p = at || { x: rand(60, YW - 60), y: rand(60, YH - 60) };
+    if (!at && (inPond(p) || dist(p, bowl) < bowl.r + 25 || objs.some(o => o.kind !== 'deco' && dist(o, p) < hitR(o) + 20))) continue;
+    keepInYard(p);
+    loot.treasures.push({ x: p.x, y: p.y, id: rollItem(setKey) });
+    return true;
+  }
+  return false;
+}
+function lootTick(now) {
+  if (!loot.last) loot.last = now - DROP_EVERY; // first one right away
+  let n = 0;
+  while (now - loot.last >= DROP_EVERY) { loot.last += DROP_EVERY; if (loot.treasures.length < MAX_DROPS && dropTreasure()) n++; }
+  if (n) { say(`✨ ${n > 1 ? n + ' treasures' : 'A treasure'} turned up in the yard! Find ${n > 1 ? 'them' : 'it'} and tap`, 3500); save(); }
+}
+function addFind(id) { // returns true if it's new
+  const isNew = !loot.found[id];
+  loot.found[id] = (loot.found[id] || 0) + 1;
+  const set = SETS.find(s => s.k === ITEMS[id].set);
+  if (isNew && !loot.sets.includes(set.k) && set.items.every(([i]) => loot.found[i])) { loot.sets.push(set.k); pendingReward = set; }
+  renderPills();
+  return isNew;
+}
+function collectTreasure(tr) {
+  loot.treasures = loot.treasures.filter(x => x !== tr);
+  const it = ITEMS[tr.id], isNew = addFind(tr.id), got = isNew ? 3 : 6; // doubles turn into extra stars
+  earn(got, tr.x, tr.y - 20); emit(tr.x, tr.y, 'sparkle', 14); buzz([20, 40, 20]);
+  job('treasure');
+  showFind(it.icon, it.name, isNew ? `New for your book! · ${RARITY[it.rar]}` : `You have ${loot.found[it.id]} of these · +${got} ⭐`, it.fact);
+  save();
+}
+function openGift() {
+  const g = loot.gift; loot.gift = null;
+  const big = MILESTONES[loot.visits], got = big || Math.round(rand(8, 16) + Math.min(10, loot.visits * 0.3));
+  earn(got, g.x, g.y - 30); emit(g.x, g.y, 'sparkle', 18); buzz([20, 40, 20, 40, 20]);
+  let line = `+${got} ⭐`, it = null;
+  if (big || Math.random() < 0.35) { // sometimes there's a find inside (milestone gifts: always a rare one)
+    it = ITEMS[rollItem(null, big ? 3 : 0)];
+    const isNew = addFind(it.id);
+    line += ` and ${it.icon} ${it.name}${isNew ? ' (new!)' : ''}`;
+  }
+  showFind('🎁', big ? `Visit #${loot.visits} gift!` : 'Mystery gift!', line, it ? it.fact : `Come back tomorrow for another gift. You've visited ${loot.visits} day${loot.visits > 1 ? 's' : ''}!`);
+  save();
+}
+const findEl = document.getElementById('find');
+function showFind(icon, title, tag, fact) {
+  findEl.querySelector('.big').textContent = icon;
+  findEl.querySelector('.title').textContent = title;
+  findEl.querySelector('.tag').textContent = tag;
+  findEl.querySelector('.fact').textContent = fact;
+  findEl.hidden = false;
+}
+findEl.querySelector('button').onclick = () => {
+  findEl.hidden = true;
+  if (!pendingReward) return;
+  const set = pendingReward, d = DECOS[set.reward]; pendingReward = null;
+  earn(50, cam.x, cam.y);
+  showFind(d.icon, `${set.name} complete!`, `+50 ⭐ and a ${d.name} for your yard`, 'Tap the yard to choose where it goes.');
+  const o = newObj('deco'); o.type = set.reward; o.seed = Math.random(); startPlacing(o);
+};
+function drawLoot(time, v) {
+  const c = ctx, sz = Math.max(30, 22 / cam.z);
+  for (const t of loot.treasures) {
+    if (!inView(t, sz * 2, v)) continue;
+    const pulse = 0.5 + 0.5 * Math.sin(time * 3 + t.y * 0.1), gr = sz * (1.1 + 0.3 * pulse); // soft golden glow so it's easy to spot
+    const glow = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, gr);
+    glow.addColorStop(0, `rgba(255,230,120,${0.45 + 0.25 * pulse})`); glow.addColorStop(1, 'rgba(255,230,120,0)');
+    c.fillStyle = glow; c.beginPath(); c.arc(t.x, t.y, gr, 0, 7); c.fill();
+    c.fillStyle = '#b49a64'; c.beginPath(); c.ellipse(t.x, t.y + sz * 0.25, sz * 0.75, sz * 0.32, 0, 0, 7); c.fill(); // little dug-up mound
+    c.fillStyle = '#cdb47e'; c.beginPath(); c.ellipse(t.x - sz * 0.15, t.y + sz * 0.15, sz * 0.4, sz * 0.15, 0, 0, 7); c.fill();
+    const tw = Math.sin(time * 4 + t.x * 0.1);
+    drawEmoji(c, '✨', t.x, t.y - sz * 0.35, sz * (1 + 0.2 * tw));
+  }
+  const g = loot.gift;
+  if (g && inView(g, 50, v)) {
+    const gs = Math.max(34, 24 / cam.z), hop = Math.abs(Math.sin(time * 3)) * gs * 0.2;
+    c.fillStyle = '#0003'; c.beginPath(); c.ellipse(g.x, g.y + gs * 0.35, gs * 0.45 * (1 - hop / gs), gs * 0.15, 0, 0, 7); c.fill();
+    drawEmoji(c, '🎁', g.x, g.y - hop, gs);
+  }
+}
+
+// ---------- daily jobs: three small tasks a day for bonus stars ----------
+const JOBS = [
+  { k: 'pet', n: 5, text: n => `Pet your turtles ${n} times` },
+  { k: 'petOne', n: 3, text: (n, w) => `Pet ${w} ${n} times` },
+  { k: 'snack', n: 6, text: n => `Drop ${n} snacks` },
+  { k: 'berry', n: 2, text: n => `Feed someone ${n} berries 🍓` },
+  { k: 'scoop', n: 4, text: n => `Scoop ${n} poops` },
+  { k: 'water', n: 1, text: () => 'Give fresh water 💧' },
+  { k: 'play', n: 12, text: n => `Turtles nudge the toy ${n} times` },
+  { k: 'call', n: 3, text: n => `Call a turtle over ${n} times` },
+  { k: 'treasure', n: 1, text: () => 'Find a treasure ✨', ok: () => loot.treasures.length > 0 },
+  { k: 'wash', n: 1, text: () => 'Wash a muddy turtle 🛁', ok: () => !!objOf('mud') },
+];
+const JOB_STARS = 15, JOBS_BONUS = 25;
+function newJobs() {
+  const pool = JOBS.filter(j => !j.ok || j.ok()), list = [];
+  while (list.length < 3 && pool.length) {
+    const j = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+    if ((j.k === 'pet' || j.k === 'petOne') && list.some(x => x.k.startsWith('pet'))) continue; // one petting job a day
+    const who = j.k === 'petOne' ? turtles[Math.floor(Math.random() * turtles.length)].name : null;
+    list.push({ k: j.k, n: j.n, have: 0, who, text: j.text(j.n, who) });
+  }
+  loot.jobs = { list, bonus: false };
+}
+function job(k, who = null, amount = 1) {
+  if (!loot.jobs) return;
+  for (const j of loot.jobs.list) {
+    if (j.have >= j.n) continue;
+    if (j.k !== k && !(k === 'pet' && j.k === 'petOne' && j.who === who)) continue;
+    j.have = Math.min(j.n, j.have + amount);
+    if (j.have >= j.n) { earn(JOB_STARS, cam.x, cam.y); say(`📋 Job done: ${j.text}! +${JOB_STARS} ⭐`, 3000); }
+  }
+  if (!loot.jobs.bonus && loot.jobs.list.every(j => j.have >= j.n)) {
+    loot.jobs.bonus = true;
+    setTimeout(() => { earn(JOBS_BONUS, cam.x, cam.y); say(`🎉 All of today's jobs done! +${JOBS_BONUS} ⭐ bonus`, 3500); }, 1500);
+  }
+  renderPills();
+}
+
+// ---------- book + jobs sheets ----------
+const bookEl = document.getElementById('book'), jobsEl = document.getElementById('jobs');
+const bookBtn = document.getElementById('book-btn'), jobsBtn = document.getElementById('jobs-btn');
+function renderPills() {
+  const n = Object.keys(loot.found).length, total = Object.keys(ITEMS).length;
+  bookBtn.textContent = `📖 ${n}/${total}`;
+  const L = loot.jobs?.list || [], done = L.filter(j => j.have >= j.n).length;
+  jobsBtn.textContent = `📋 ${done}/${L.length}`;
+  jobsBtn.classList.toggle('ready', L.length > 0 && done === L.length);
+}
+function openBook() {
+  const n = Object.keys(loot.found).length;
+  bookEl.querySelector('.sub').textContent = `${n} of ${Object.keys(ITEMS).length} found · ${loot.sets.length} of ${SETS.length} sets complete`;
+  bookEl.querySelector('.sets').innerHTML = SETS.map(s => {
+    const have = s.items.filter(([i]) => loot.found[i]).length, d = DECOS[s.reward], done = loot.sets.includes(s.k);
+    return `<div class="set"><div class="hd"><span>${s.name}</span><span>${have}/${s.items.length}</span></div>`
+      + `<div class="rw ${done ? 'got' : ''}">${done ? `✓ Unlocked the ${d.icon} ${d.name}` : `Finish the set to unlock the ${d.icon} ${d.name}`}</div><div class="tiles">`
+      + s.items.map(([id, icon, name]) => loot.found[id]
+        ? `<button class="tile" data-id="${id}"><span class="e">${icon}</span><small>${name}</small></button>`
+        : `<button class="tile no" data-id="${id}"><span class="e">${icon}</span><small>???</small></button>`).join('')
+      + '</div></div>';
+  }).join('');
+  bookEl.querySelector('.fact').textContent = 'Tap a find to read about it.';
+  bookEl.hidden = false;
+}
+bookEl.querySelector('.sets').addEventListener('click', e => {
+  const id = e.target.closest('.tile')?.dataset.id, it = ITEMS[id];
+  if (!it) return;
+  bookEl.querySelector('.fact').textContent = loot.found[id]
+    ? `${it.icon} ${it.name} (${RARITY[it.rar]}, ×${loot.found[id]}): ${it.fact}`
+    : `Not found yet. ${RARITY[it.rar]} · keep an eye out for ✨ in the yard!`;
+});
+function openJobs() {
+  const L = loot.jobs?.list || [];
+  jobsEl.querySelector('.sub').textContent = `+${JOB_STARS} ⭐ each · finish all ${L.length} for +${JOBS_BONUS} ⭐ more · new jobs tomorrow`;
+  jobsEl.querySelector('.list').innerHTML = L.map(j => `<div class="job ${j.have >= j.n ? 'done' : ''}"><span class="ck">${j.have >= j.n ? '✅' : '⬜'}</span>`
+    + `<span>${esc(j.text)}</span><span class="pr">${j.have}/${j.n}</span></div>`).join('') || '<div class="sub">No jobs yet. Check back soon!</div>';
+  jobsEl.hidden = false;
+}
+bookBtn.onclick = openBook;
+jobsBtn.onclick = openJobs;
+for (const el of [bookEl, jobsEl]) {
+  el.querySelector('.close').onclick = () => { el.hidden = true; };
+  el.addEventListener('click', e => { if (e.target === el) el.hidden = true; });
+}
+
 // ---------- decorations ----------
 function seeded(seed) { let s = Math.floor(seed * 2147483646) + 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
 function drawDeco(o, time, dk) {
   const c = ctx, r = seeded(o.seed || 0.5), { x, y } = o;
+  if (DECOS[o.type]?.emoji) { // collection rewards: a big emoji standing in the yard
+    c.fillStyle = '#0003'; c.beginPath(); c.ellipse(x + 3, y + 4, 22, 9, 0, 0, 7); c.fill();
+    drawEmoji(c, DECOS[o.type].icon, x, y - 22, 52); return;
+  }
   if (o.type === 'flowers') {
     const cols = ['#f26d8f', '#f7d14a', '#b77df0', '#fff', '#ff8f4a'];
     for (let i = 0; i < 6; i++) {
@@ -2015,7 +2253,7 @@ function say(text, ms = 1800) { hint.textContent = text; hint.classList.add('sho
 document.querySelectorAll('#tools button').forEach(b => b.addEventListener('click', () => {
   if (b.dataset.act === 'water') {
     if (bowl.level < 0.5 && waterStarCool <= 0) { earn(1, bowl.x, bowl.y - bowl.r - 10); waterStarCool = 60; }
-    bowl.level = 1; bowl.fill = 1; buzz(15);
+    bowl.level = 1; bowl.fill = 1; buzz(15); job('water');
     for (let i = 0; i < 14; i++) emit(bowl.x, bowl.y, 'drop');
     say('Fresh water!');
     return;
@@ -2054,12 +2292,14 @@ function earn(n, x, y) {
   parts.push({ x, y, kind: 'star', text: `+${n}⭐`, t: 0, life: 1.3, vx: 0, vy: -28 });
   starsEl.classList.remove('bump'); void starsEl.offsetWidth; starsEl.classList.add('bump');
 }
-function dailyBonus() {
+function dailyBonus() { // first visit of a new day: a mystery gift and three new jobs
   const today = new Date().toDateString();
-  if (lastDaily === today) return;
-  const first = !lastDaily;
-  lastDaily = today;
-  if (!first) { earn(5, sel.x, sel.y - 60); setTimeout(() => say('Daily visit bonus: +5 ⭐', 2500), 600); }
+  if (loot.day === today) return;
+  loot.day = today; lastDaily = today; loot.visits++;
+  loot.gift = { x: clamp(cam.x + rand(-60, 60), 60, YW - 60), y: clamp(cam.y + rand(-30, 50), 60, YH - 60) };
+  newJobs();
+  setTimeout(() => say(MILESTONES[loot.visits] ? `🎁 Visit #${loot.visits}! A BIG gift is waiting in the yard!` : '🎁 A mystery gift is waiting in the yard!', 3500), 1500);
+  renderPills();
 }
 
 let drag = null; // ball being flicked
@@ -2154,7 +2394,7 @@ function startArrange() {
 function endArrange() { if (!arranging) return; arranging = false; doneBtn.hidden = true; save(); }
 doneBtn.onclick = endArrange;
 function wash(t) {
-  t.mud = 0; buzz(12);
+  t.mud = 0; buzz(12); job('wash');
   for (let i = 0; i < 12; i++) emit(t.x, t.y, 'drop');
   emit(t.x, t.y, 'sparkle', 6); earn(1, t.x, t.y - t.S * 2);
   t.st.happy = clamp(t.st.happy + 4, 0, 100);
@@ -2169,25 +2409,29 @@ function tap(p) {
     return;
   }
   if (arranging) return;
+  const grab = Math.max(30, 22 / cam.z); // easy to tap even when zoomed out
+  const tr = loot.treasures.find(t => dist(t, p) < grab);
+  if (tr) return collectTreasure(tr);
+  if (loot.gift && dist(loot.gift, p) < grab + 6) return openGift();
   if (p.x < 0 || p.y < 0 || p.x > YW || p.y > YH) { if (isPicked() && turtles.length > 1) deselect(); return; }
   const hitT = turtles.filter(t => t.releasing === undefined && dist(p, t) < t.S * 1.2 + 8 / cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0];
   if (hitT && mode === 'clean' && hitT.mud > 0) return wash(hitT);
   if (hitT && hitT === sel && picked && turtles.length > 1) return deselect(); // tap the picked turtle again to let go
   if (hitT) return pet(hitT);
   if (mode === 'walk' && !isPicked()) say('Tap a turtle to pick it, then tap to call it');
-  else if (mode === 'walk') { wakeUp(sel); sel.userTarget = { x: p.x, y: p.y }; sel.eat = null; sel.drinkT = 0; sel.outing = null; }
+  else if (mode === 'walk') { job('call'); wakeUp(sel); sel.userTarget = { x: p.x, y: p.y }; sel.eat = null; sel.drinkT = 0; sel.outing = null; }
   else if (mode === 'food') {
     if (foods.filter(f => f.slot === undefined).length >= 6) return say('That\'s plenty of food!');
     const type = foodType;
     const bites = type === 'berry' ? 2 : 3;
-    const f = { x: p.x, y: p.y, type, bites, max: bites, rot: rand(0, 6) }; keepInYard(f); foods.push(f);
+    const f = { x: p.x, y: p.y, type, bites, max: bites, rot: rand(0, 6) }; keepInYard(f); foods.push(f); job('snack');
     buzz(8);
   } else if (mode === 'clean') {
     const hit = poops.filter(q => dist(q, p) < Math.max(26, 30 / cam.z));
     if (!hit.length) return say(poops.length ? 'Tap right on a mess' : 'All clean! ✨');
     poops = poops.filter(q => !hit.includes(q));
     hit.forEach(q => emit(q.x, q.y, 'sparkle', 6));
-    earn(2 * hit.length, hit[0].x, hit[0].y - 14);
+    earn(2 * hit.length, hit[0].x, hit[0].y - 14); job('scoop', null, hit.length);
     turtles.forEach(t => t.st.happy = clamp(t.st.happy + 3 * hit.length, 0, 100)); buzz(12);
     if (!poops.length) say('Spotless! ✨');
   } else if (mode === 'play' && !ball) { // toy timed out: a new one appears where you tap
@@ -2213,6 +2457,7 @@ function pet(t) {
   if (t.petCool > 0) return;
   const f = t.traits.friendly;
   t.petT = lerp(1.9, 0.9, f); t.petCool = 1.2; t.v *= 0.2; // grumpy turtles hide in their shell longer
+  job('pet', t.name);
   if (f < 0.35 && Math.random() < 0.6) { // not in the mood
     t.st.happy = clamp(t.st.happy + 1, 0, 100); t.st.social = clamp(t.st.social + 5, 0, 100);
     setTimeout(() => emit(t.x, t.y - t.S, 'grr'), t.petT * 500);
@@ -2390,6 +2635,7 @@ function buildShop() {
   }
   rows.push({ sec: '🌷 Decorations' });
   for (const [k, dd] of Object.entries(DECOS)) {
+    if (dd.reward) continue; // earned from the collection book, not sold
     const n = objs.filter(o => o.kind === 'deco' && o.type === k).length;
     rows.push({ icon: dd.icon, name: dd.name, desc: (dd.desc ? dd.desc + ' ' : '') + (dd.light ? 'Glows at night. ' : '') + (n ? `You have ${n}.` : 'Buy as many as you like.'), cost: dd.cost + (dd.step || 0) * n, buy: () => { const o = newObj('deco'); o.type = k; o.seed = Math.random(); startPlacing(o); } });
   }
@@ -2507,6 +2753,7 @@ function frame(now) {
   marker = isPicked() ? sel.userTarget : null;
   const nowMs = Date.now(), dk = darkness();
   gardenTick(nowMs);
+  lootTick(nowMs);
   if (objOf('garden')) for (const f of foods) if (f.slot !== undefined) { const sp = slotPos(f.slot); f.x = sp.x; f.y = sp.y; }
   updateCrabs(dt);
   updateFlies(dt, dk, v);
@@ -2533,6 +2780,7 @@ function frame(now) {
   for (const o of objs) if (o.kind === 'deco' && !DECOS[o.type].tall && !DECOS[o.type].canopy && inView(o, 40, v)) drawDeco(o, time, dk);
   for (const p of poops) if (inView(p, 30, v)) drawPoop(p, time);
   for (const f of foods) if (inView(f, 30, v)) drawFoodItem(f);
+  drawLoot(time, v);
   if (inView(bowl, bowl.r + 10, v)) drawBowl(time); // low to the ground: turtles always walk over it
   drawMarker(time);
   // turtles, crabs, toy, bowl, feeder, mirror and tall decorations back-to-front so overlaps look right
@@ -2591,6 +2839,7 @@ use(sel);
 if (info.away > 90) showAway(simulateAway(info.away));
 if (info.newStars) setTimeout(() => say('New: collect ⭐ by caring for your turtles. Tap ⭐ to shop!', 4000), 800);
 dailyBonus();
+renderPills();
 ensurePlots(); syncCrabs();
 addEventListener('resize', resize);
 setInterval(save, 4000);
