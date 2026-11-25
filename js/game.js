@@ -2416,6 +2416,7 @@ function openBook() {
     const have = s.items.filter(([i]) => loot.found[i]).length, d = DECOS[s.reward], done = loot.sets.includes(s.k);
     return `<div class="set"><div class="hd"><span>${s.name}</span><span>${have}/${s.items.length}</span></div>`
       + `<div class="rw ${done ? 'got' : ''}">${done ? `✓ Unlocked the ${d.icon} ${d.name}` : `Finish the set to unlock the ${d.icon} ${d.name}`}</div>`
+      + (done && !powerHere(s.k) ? `<button class="place" data-set="${s.k}">📍 Place the ${d.name} in ${esc(yardName)}</button>` : '')
       + `<div class="pw">${POWERS[s.k].icon} <b>${POWERS[s.k].name}</b>: ${POWERS[s.k].desc} ${done ? `Place the ${d.name} in a yard to use it there (recharges every 3 h).` : `The ${d.name} gives you this power.`}</div><div class="tiles">`
       + s.items.map(([id, icon, name]) => loot.found[id]
         ? `<button class="tile" data-id="${id}"><span class="e">${icon}</span><small>${name}</small></button>`
@@ -2426,6 +2427,14 @@ function openBook() {
   bookEl.hidden = false;
 }
 bookEl.querySelector('.sets').addEventListener('click', e => {
+  const pl = e.target.closest('.place');
+  if (pl) { // put a finished set's decoration (and its power) into this yard, free
+    const k = pl.dataset.set, set = SETS.find(s => s.k === k);
+    if (!loot.sets.includes(k) || powerHere(k)) return;
+    bookEl.hidden = true;
+    const o = newObj('deco'); o.type = set.reward; o.seed = Math.random(); startPlacing(o);
+    return say(`Tap the yard where the ${DECOS[set.reward].name} should go`, 3000);
+  }
   const id = e.target.closest('.tile')?.dataset.id, it = ITEMS[id];
   if (!it) return;
   bookEl.querySelector('.fact').textContent = loot.found[id]
@@ -2943,7 +2952,10 @@ function pointerEnd(e) {
   if (gest?.kind === 'ball') endDrag();
   else if (gest?.kind === 'move' && !gest.moved && gest.o.kind === 'deco' && e.type === 'pointerup') {
     const o = gest.o;
-    askConfirm(`Remove this ${DECOS[o.type].name.toLowerCase()}?`, "You won't get the stars back.", 'Remove', () => { objs = objs.filter(x => x !== o); emit(o.x, o.y, 'sparkle', 6); save(); });
+    const pk = powerOfDeco(o.type);
+    askConfirm(`Remove this ${DECOS[o.type].name.toLowerCase()}?`,
+      pk ? `This yard will lose its power ${POWERS[pk].icon} ${POWERS[pk].name}. You can place it again any time from the 📖 book.` : "You won't get the stars back.",
+      'Remove', () => { objs = objs.filter(x => x !== o); emit(o.x, o.y, 'sparkle', 6); save(); });
   }
   else if (gest?.kind === 'maybe' && e.type === 'pointerup') tap(s2w(e.clientX, e.clientY));
   if (gest?.kind === 'pinch' && ptrs.size) gest = { kind: 'done' }; // the finger left behind doesn't tap
