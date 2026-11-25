@@ -27,8 +27,8 @@ const YARDS = [
   { name: 'Huge', m: 3.2, cost: 400, fits: 8 }, { name: 'Giant', m: 4.2, cost: 1200, fits: 10 },
 ];
 const BOWLS = [
-  { name: 'Water bowl', r: 38, cap: 1 }, { name: 'Big bowl', r: 46, cap: 2, cost: 25 }, { name: 'Fountain', r: 52, cap: 3, cost: 120, refill: 1 },
-  { name: 'Grand fountain', r: 64, cap: 6, cost: 500, refill: 2 },
+  { name: 'Water bowl', r: 38, cap: 1 }, { name: 'Big bowl', r: 46, cap: 2, cost: 25 }, { name: 'Fountain', r: 60, cap: 3, cost: 120, refill: 1 },
+  { name: 'Grand fountain', r: 108, cap: 6, cost: 500, refill: 2 }, // a turtle family can drink all the way round
 ];
 const FEEDERS = [null,
   { name: 'Auto feeder', cost: 60, every: 45, awayEvery: 3 * 3600 },
@@ -40,15 +40,30 @@ const TOYS = {
   treat: { name: 'Treat ball', icon: '🍪', r: 14, cost: 40, push: 0.9, drag: 0.3, desc: 'Drops a snack now and then when nudged.' },
   beach: { name: 'Beach ball', icon: '🏖️', r: 24, cost: 50, push: 1.5, drag: 0.55, desc: 'Big, light and bouncy.' },
 };
+// Rocks: one of each kind. All are basking spots; each has its own look and a perk.
+const ROCKS = {
+  rock: { name: 'Basking rock', icon: '🪨', cost: 20, rx: 90, ry: 58, look: 'oval', col: ['#9b9286', '#b3aa9d', '#c8bfb2'], desc: 'A warm spot to nap in the sun.' },
+  sandrock: { name: 'Sandstone rock', icon: '🏜️', cost: 120, rx: 106, ry: 67, look: 'layers', col: ['#c98f52', '#dcaa6c', '#ecc890'], sun: 1, desc: 'Soaks up the sun: basking here is extra cozy.' },
+  clayrock: { name: 'Clay boulder', icon: '🧱', cost: 150, rx: 83, ry: 70, look: 'lumpy', col: ['#a45a3c', '#bf7452', '#d8946e'], nap: 1, desc: 'Cool and smooth. Tired turtles rest up fast on it.' },
+  mossrock: { name: 'Mossy rock', icon: '🍃', cost: 180, rx: 96, ry: 64, look: 'moss', col: ['#7f8a78', '#97a28f', '#b0b9a6'], shy: 1, desc: 'Soft and quiet. Shy turtles feel safe here.' },
+  slab: { name: 'Sunning slab', icon: '🌞', cost: 220, rx: 154, ry: 54, look: 'slab', col: ['#8e8a80', '#a8a499', '#c2beb3'], sun: 0.5, desc: 'A long flat stone with room for a row of sunbathers.' },
+  heatrock: { name: 'Heated rock', icon: '♨️', cost: 400, rx: 86, ry: 61, look: 'heat', col: ['#4a4440', '#5e5752', '#746c66'], heat: 1, desc: 'Warm all night long, and glows softly in the dark.' },
+  lookout: { name: 'Lookout rock', icon: '⛰️', cost: 1800, rx: 223, ry: 148, look: 'lookout', col: ['#8b7f70', '#a39684', '#bdb09c'], climb: 1, needYard: 3, desc: 'A giant rock with a ledge on top. The whole family can climb up and look out over the yard.' },
+};
+const rockDims = o => { const r = ROCKS[o.kind], k = sizeK(o.kind); return { rx: r.rx * k, ry: r.ry * k }; };
+const rocksPlaced = () => objs.filter(o => ROCKS[o.kind]);
 const STRUCTS = {
-  rock: { name: 'Basking rock', icon: '🪨', cost: 20, desc: 'A warm spot to nap in the sun.' },
   log: { name: 'Log tunnel', icon: '🪵', cost: 45, desc: 'Curious turtles love crawling through.' },
   hut: { name: 'Hideaway hut', icon: '🛖', cost: 70, desc: 'A cozy hideout. Grumpy turtles calm down inside.' },
   pond: { name: 'Pond', icon: '🌊', cost: 200, desc: 'Swim, splash and drink as much as they like.', needYard: 1 },
   mud: { name: 'Mud pit', icon: '🟫', cost: 60, desc: 'Turtles love a good roll. Wash them afterwards!' },
   slide: { name: 'Slide', icon: '🛝', cost: 80, desc: 'Climb up, zoom down. Wheee!' },
   mirror: { name: 'Mirror', icon: '🪞', cost: 35, desc: 'Curious turtles admire themselves. Grumpy ones... not so much.' },
+  mossbed: { name: 'Moss bed', icon: '🛏️', cost: 300, desc: 'A soft mossy bed. Turtles sleep deeper here and love to pile up together.' },
+  fog: { name: 'Fog machine', icon: '🌫️', cost: 350, desc: 'Puffs cool mist. Turtles love a misty stroll, mud stays soft, and it glows at night.' },
+  cave: { name: 'Stone cave', icon: '🕳️', cost: 400, desc: 'A cool stone hideout. Shy turtles adore it.' },
 };
+const BED = { rx: 82, ry: 56 }, FOG_R = 170, CAVE = { r: 125 }, TREE_R = 150;
 const AUTO = {
   lamp: { name: 'Heat lamp', icon: '🔆', cost: 80, desc: 'Turtles nearby stay full longer and grow faster. Glows at night.' },
   garden: { name: 'Veggie garden', icon: '🥬', cost: 70, desc: 'Grows lettuce in real time. Turtles help themselves.' },
@@ -60,7 +75,22 @@ const DECOS = {
   stones: { name: 'Stepping stones', icon: '🪨', cost: 12 },
   bush: { name: 'Bush', icon: '🌿', cost: 15, tall: true },
   lantern: { name: 'Lantern', icon: '🏮', cost: 25, tall: true, light: true },
+  tree: { name: 'Shade tree', icon: '🌳', cost: 150, step: 75, canopy: true, desc: 'Turtles nap in its shade on sunny days. Every tree grows a little differently.' },
 };
+// Each tree's size and look come from its seed: 85-130% of TREE_R, its own greens, some in blossom or fruit.
+function treeLook(o) {
+  if (o.look) return o.look;
+  const r = seeded(o.seed || 0.83), sc = 0.85 + r() * 0.45, R0 = TREE_R * sc, kind = r();
+  const hue = 95 + r() * 35, sat = 30 + r() * 22, light = 26 + r() * 12;
+  const blobs = Array.from({ length: 8 + Math.floor(r() * 7) }, () => {
+    const a = r() * 6.28, d = Math.sqrt(r()) * 0.62;
+    return { x: Math.cos(a) * R0 * d, y: Math.sin(a) * R0 * d * 0.72, r: R0 * (0.3 + r() * 0.24), l: light + (r() - 0.5) * 10 };
+  });
+  const tufts = Array.from({ length: 5 + Math.floor(r() * 6) }, () => ({ x: (r() - 0.5) * R0 * 1.3, y: (r() - 0.65) * R0 * 0.8, r: 10 + r() * 18 }));
+  const dots = kind > 0.72 ? Array.from({ length: 14 + Math.floor(r() * 12) }, () => ({ x: (r() - 0.5) * R0 * 1.4, y: (r() - 0.55) * R0, r: 2.5 + r() * 2.5 })) : [];
+  return (o.look = { R: R0, lean: (r() - 0.5) * R0 * 0.25, hue, sat, light, blobs, tufts, dots, dotCol: r() < 0.5 ? '#f4a6c4' : '#d8423a' });
+}
+const trees = () => objs.filter(o => o.kind === 'deco' && o.type === 'tree');
 const MUD = { rx: 72, ry: 46 }, SLIDE = { len: 150, w: 46 }, SLOT = 44;
 let LAMP_R = 130;
 // Bigger versions of placed things, bought once the smaller one is in the yard. k scales its size.
@@ -78,7 +108,7 @@ let plots = [];   // garden slots: { t0 (planted, ms) }
 let crabs = [];   // clean-up crabs (not saved: they just scuttle back in)
 let flies = [];   // fireflies at night
 let arranging = false, hourOverride = null;
-const POND = { rx: 120, ry: 78 }, LOG = { len: 150, r: 40 }, HUT = { r: 54 }, ROCK = { rx: 56, ry: 36 }, FEEDER_R = 26;
+const POND = { rx: 120, ry: 78 }, LOG = { len: 150, r: 40 }, HUT = { r: 54 }, FEEDER_R = 26;
 let up = { yard: 0, bowl: 0, feeder: 0, toys: ['ball'], toy: 'ball', crab: 0, vet: 0, garden: 0, size: {} };
 let objs = []; // placed things: { kind: 'feeder' | 'rock' | 'log' | 'hut' | 'pond', x, y }
 let stars = 0, lastDaily = '', base = null, feederT = 0, waterStarCool = 0;
@@ -87,7 +117,7 @@ const cam = { x: 200, y: 300, z: 1 };
 let placing = null; // object waiting for a tap to be put down
 const objOf = kind => objs.find(o => o.kind === kind);
 const inPond = p => { const o = objOf('pond'); return !!o && ((p.x - o.x) / POND.rx) ** 2 + ((p.y - o.y) / POND.ry) ** 2 < 1; };
-const structCount = () => objs.filter(o => STRUCTS[o.kind]).length;
+const structCount = () => objs.filter(o => STRUCTS[o.kind] || ROCKS[o.kind]).length;
 
 // Growth: 0 = fresh hatchling, 1 = full-grown. Size (half shell length) scales with it.
 const MIN_S = 15, MAX_S = 44;
@@ -101,7 +131,25 @@ const sizeFor = g => lerp(MIN_S, MAX_S, Math.sqrt(clamp(g, 0, 1))); // grows fas
 // Each turtle has its own body, needs, health and growth. The brain/legs/drawing code works on the
 // "current" turtle via T, S (its size) and st (its stats); use(t) switches which one that is.
 const MAX_TURTLES = 10;
-const NAMES = ['Shelly', 'Pebble', 'Tank', 'Mossy', 'Sheldon', 'Dot', 'Biscuit', 'Ziggy', 'Clover', 'Nugget'];
+const NAMES = [
+  'Shelly', 'Pebble', 'Tank', 'Mossy', 'Sheldon', 'Dot', 'Biscuit', 'Ziggy', 'Clover', 'Nugget', 'Pickle', 'Peanut',
+  'Sprout', 'Bean', 'Basil', 'Olive', 'Maple', 'Hazel', 'Juniper', 'Willow', 'Fern', 'Ivy', 'Sage', 'Pip',
+  'Poppy', 'Daisy', 'Lily', 'Tulip', 'Acorn', 'Chestnut', 'Walnut', 'Pecan', 'Cashew', 'Mochi', 'Dumpling', 'Noodle',
+  'Waffle', 'Muffin', 'Cookie', 'Cupcake', 'Pudding', 'Jelly', 'Toffee', 'Fudge', 'Pretzel', 'Nacho', 'Taco', 'Bagel',
+  'Sushi', 'Kiwi', 'Mango', 'Peach', 'Plum', 'Fig', 'Cherry', 'Berry', 'Lemon', 'Lime', 'Melon', 'Pumpkin',
+  'Squash', 'Turnip', 'Radish', 'Leafy', 'Cabbage', 'Tater', 'Spud', 'Crouton', 'Gizmo', 'Gadget', 'Widget', 'Sprocket',
+  'Rocket', 'Comet', 'Cosmo', 'Luna', 'Nova', 'Star', 'Orbit', 'Pluto', 'Ripple', 'Splash', 'Puddle', 'Brook',
+  'River', 'Wave', 'Coral', 'Reef', 'Sandy', 'Dusty', 'Rocky', 'Boulder', 'Pebbles', 'Flint', 'Slate', 'Cobble',
+  'Marble', 'Jasper', 'Onyx', 'Opal', 'Turbo', 'Zippy', 'Dash', 'Bolt', 'Scooter', 'Bumble', 'Wiggles', 'Snappy',
+  'Doodle', 'Noodles', 'Bubbles', 'Buttons', 'Pickles', 'Sparky', 'Speedy', 'Sleepy', 'Grumpy', 'Happy', 'Lucky', 'Sunny',
+];
+// a random name nobody in the yard has yet (falls back to 'Turtle 7' style if all are taken)
+function randomName() {
+  const used = new Set(turtles.map(t => t.name)), free = NAMES.filter(n => !used.has(n));
+  if (free.length) return free[Math.floor(Math.random() * free.length)];
+  let i = turtles.length + 1; while (used.has(`Turtle ${i}`)) i++;
+  return `Turtle ${i}`;
+}
 // Each turtle gets a slight color variation: shell hue, skin hue (degrees) and brightness.
 const randomTint = () => ({ shell: rand(-28, 28), skin: rand(-18, 18), light: rand(-0.12, 0.12) });
 const tintGap = (a, b) => Math.abs(a.shell - b.shell) / 28 + Math.abs(a.skin - b.skin) / 18 + Math.abs(a.light - b.light) / 0.12;
@@ -142,9 +190,9 @@ function makeTurtle(o = {}) {
     userTarget: null, outing: null, rest: null, idleT: rand(1, 4), starCool: 0, playStarCool: 0,
     eat: null, drinkT: 0, petT: 0, petCool: 0, nudgeCool: 0,
     gut: [], growth: 0, blinkT: rand(1, 4), blink: 0, tailT: rand(0, 6), lookAt: null,
-    name: 'Shelly',
     ...o,
   };
+  if (!t.name) t.name = randomName();
   if (!t.tint) t.tint = o.hue ? { shell: clamp(o.hue * 0.5, -28, 28), skin: clamp(o.hue * 0.3, -18, 18), light: rand(-0.12, 0.12) } : randomTint();
   t.st = { hunger: 80, thirst: 80, happy: 70, health: 100, social: 80, energy: 85, warm: 90, ...(o.st || {}) }; // last three are hidden moods
   t.chub = o.chub || 0; t.diet = o.diet || []; // chub: 0 = trim, 1 = very round; diet = last few foods eaten
@@ -187,7 +235,7 @@ function applyYard() {
   YW = Math.round(base.w * m); YH = Math.round(base.h * m);
   bowl.r = BOWLS[up.bowl].r;
   const k = sizeK;
-  POND.rx = 120 * k('pond'); POND.ry = 78 * k('pond'); HUT.r = 54 * k('hut'); ROCK.rx = 56 * k('rock'); ROCK.ry = 36 * k('rock');
+  POND.rx = 120 * k('pond'); POND.ry = 78 * k('pond'); HUT.r = 54 * k('hut');
   LOG.len = 150 * k('log'); LOG.r = 40 * (1 + (k('log') - 1) * 0.3); MUD.rx = 72 * k('mud'); MUD.ry = 46 * k('mud'); LAMP_R = 130 * k('lamp');
   for (const p of [...poops, ...foods, ...objs, bowl]) keepInYard(p);
   for (const t of turtles) { t.x = clamp(t.x, 35, YW - 35); t.y = clamp(t.y, 25, YH - 15); }
@@ -304,7 +352,7 @@ function load() {
   poops = d.poops || []; bowl.level = d.level ?? 1; foods = d.foods || [];
   turtles = d.turtles.map(o => makeTurtle({ ...o, gut: o.gut || [] }));
   sel = turtles[d.sel] || turtles[0];
-  base = d.base || null; up = { ...up, ...(d.up || {}) }; up.size = { ...(up.size || {}) }; objs = d.objs || []; plots = d.plots || [];
+  base = d.base || null; up = { ...up, ...(d.up || {}) }; up.size = { ...(up.size || {}) }; objs = (d.objs || []).map(o => (o.kind === 'tree' ? { kind: 'deco', type: 'tree', seed: o.seed ?? Math.random(), x: o.x, y: o.y } : o)); plots = d.plots || [];
   stars = d.stars ?? 30; lastDaily = d.lastDaily || '';
   if (d.bowlPos) Object.assign(bowl, d.bowlPos);
   if (d.cam) Object.assign(cam, d.cam);
@@ -395,7 +443,7 @@ function simulateAway(secs) {
     }
   }
   turtles.forEach(t => t.mud = Math.max(0, (t.mud || 0) - secs / 900));
-  const chilly = darkness() > 0.5 && !lamp && !objOf('hut'); // a cold night with nowhere warm
+  const chilly = darkness() > 0.5 && !lamp && !['hut', 'cave', 'heatrock', 'mossbed'].some(objOf); // a cold night with nowhere warm
   turtles.forEach(t => t.st.warm = chilly ? Math.min(t.st.warm, 45) : 100);
   turtles.forEach(t => t.S = sizeFor(t.growth));
   return { secs, rep, dryAt, fed, cleaned, grown };
@@ -472,7 +520,8 @@ function goalFor() {
       o.route.shift();
       if (o.route.length) return;
       T.outing = null; T.idleT = rand(2, 6) * lerp(2.2, 0.5, T.traits.curious);
-      if (o.then === 'bask') T.rest = { kind: 'bask', t: rand(8, 16) };
+      if (o.then === 'bask') T.rest = { kind: 'bask', t: rand(8, 16) * (o.on === 'lookout' ? 1.6 : 1), on: o.on };
+      if (o.then === 'mist') { st.happy = clamp(st.happy + 4, 0, 100); emit(T.x, T.y - S, 'heart'); }
       if (o.then === 'hide') T.rest = { kind: 'hide', t: rand(10, 20) };
       if (o.then === 'tunnel') { st.happy = clamp(st.happy + 3 + T.traits.curious * 6, 0, 100); emit(T.x, T.y - S, 'heart'); }
       if (o.then === 'sleep') T.rest = { kind: 'sleep', t: rand(40, 120) };
@@ -491,8 +540,27 @@ function goalFor() {
 // Pick something to do when idle: a stroll, or a visit to a play structure the turtle's personality likes.
 function pickOuting() {
   const tr = T.traits, opts = [];
-  const rock = objOf('rock'), log = objOf('log'), hut = objOf('hut'), pond = objOf('pond');
-  if (rock) opts.push([0.25 + (1 - tr.speed) * 0.25, () => ({ route: [{ x: rock.x + rand(-10, 10), y: rock.y + rand(-6, 6) }], then: 'bask' })]);
+  const log = objOf('log'), hut = objOf('hut'), pond = objOf('pond'), dkNow = darkness();
+  for (const rk of rocksPlaced()) { // each rock pulls different turtles
+    const R = ROCKS[rk.kind], { rx, ry } = rockDims(rk);
+    let w = 0.2 + (1 - tr.speed) * 0.2;
+    if (R.sun && dkNow < 0.3) w += 0.3 * R.sun;
+    if (R.nap && st.energy < 50) w += 1;
+    if (R.shy) w += (1 - tr.friendly) * 0.6;
+    if (R.heat) w += (st.warm < 60 ? 3 : 0) + (dkNow > 0.5 ? 0.5 : 0);
+    if (R.climb) w += 0.3 + tr.curious * 0.6;
+    if (dkNow > 0.5 && !R.heat) w *= 0.3; // cold stone at night
+    opts.push([w, () => {
+      const top = R.climb ? { x: rk.x + rand(-0.35, 0.35) * rx, y: rk.y - ry * 0.12 + rand(-0.25, 0.25) * ry } : { x: rk.x + rand(-0.45, 0.45) * rx, y: rk.y + rand(-0.35, 0.35) * ry };
+      return { route: R.climb ? [{ x: rk.x - rx * 0.55, y: rk.y + ry * 0.75 }, top] : [top], then: 'bask', on: rk.kind };
+    }]);
+  }
+  const fog = objOf('fog'), cave = objOf('cave');
+  if (fog) opts.push([0.1 + tr.playful * 0.3 + tr.curious * 0.2, () => {
+    const pt = () => { const a = rand(0, 7), d = rand(30, FOG_R * 0.8); return { x: clamp(fog.x + Math.cos(a) * d, 40, YW - 40), y: clamp(fog.y + Math.sin(a) * d * 0.7, 30, YH - 20) }; };
+    return { route: [pt(), pt(), pt()], then: 'mist' };
+  }]);
+  if (cave) opts.push([0.05 + (1 - tr.friendly) * 0.7 + (st.happy < 40 ? 0.3 : 0), () => ({ route: [{ x: cave.x, y: cave.y + CAVE.r + 28 }, { x: cave.x + rand(-12, 12), y: cave.y + rand(-8, 8) }], then: 'hide' })]);
   if (log) opts.push([0.1 + tr.curious * 0.45, () => {
     const e = [{ x: log.x - LOG.len / 2 - 40, y: log.y }, { x: log.x + LOG.len / 2 + 40, y: log.y }];
     if (dist(T, e[1]) < dist(T, e[0])) e.reverse();
@@ -627,8 +695,8 @@ function think(dt) {
       T.idleT -= dt;
       if (T.idleT <= 0) {
         if ((darkness() > 0.6 || st.energy < 35) && st.hunger > 35 && st.thirst > 35 && Math.random() < 0.85) { // bedtime, or a nap
-          const hut = objOf('hut');
-          if (hut && Math.random() < 0.6) T.outing = { route: [{ x: hut.x, y: hut.y + HUT.r + 30 }, { x: hut.x + rand(-15, 15), y: hut.y + rand(-10, 10) }], then: 'sleep' };
+          const spot = bedSpot();
+          if (spot) T.outing = { route: spot, then: 'sleep' };
           else T.rest = { kind: 'sleep', t: rand(40, 120) };
         } else T.outing = pickOuting();
         T.idleT = rand(3, 8) * lerp(2.2, 0.5, T.traits.curious);
@@ -752,9 +820,34 @@ function updateBall(dt) {
 const makeBall = (x, y) => ({ x, y, vx: 0, vy: 0, r: TOYS[up.toy].r, spin: 0, idle: 0, toy: up.toy });
 
 // ---------- stats ----------
+// Where to sleep: hut, cave, moss bed, or under the tree on a sunny day. Returns a route, or null = right here.
+function bedSpot() {
+  const hut = objOf('hut'), cave = objOf('cave'), bed = objOf('mossbed'), tr = trees(), day = darkness() < 0.3, opts = [];
+  if (hut) opts.push([1, () => [{ x: hut.x, y: hut.y + HUT.r + 30 }, { x: hut.x + rand(-15, 15), y: hut.y + rand(-10, 10) }]]);
+  if (cave) opts.push([0.4 + (1 - T.traits.friendly), () => [{ x: cave.x, y: cave.y + CAVE.r + 28 }, { x: cave.x + rand(-12, 12), y: cave.y + rand(-8, 8) }]]);
+  if (bed) opts.push([1.6, () => [{ x: bed.x + rand(-0.55, 0.55) * BED.rx, y: bed.y + rand(-0.5, 0.5) * BED.ry }]]);
+  if (tr.length && day) opts.push([2, () => { // nearest tree's shade
+    const tree = tr.reduce((b, o) => (dist(o, T) < dist(b, T) ? o : b)), L = treeLook(tree), a = rand(0, 7), d = rand(20, L.R * 0.6);
+    return [{ x: clamp(tree.x + L.lean + Math.cos(a) * d, 40, YW - 40), y: clamp(tree.y - 10 + Math.sin(a) * d * 0.6, 30, YH - 20) }];
+  }]);
+  if (!opts.length || Math.random() < 0.12) return null;
+  let r = Math.random() * opts.reduce((a, o) => a + o[0], 0);
+  for (const [w, f] of opts) if ((r -= w) <= 0) return f();
+  return opts[0][1]();
+}
+const near = (kind, t, rr) => { const o = objOf(kind); return !!o && dist(t, o) < rr; };
+const onBed = t => { const b = objOf('mossbed'); return !!b && ((t.x - b.x) / BED.rx) ** 2 + ((t.y - b.y) / BED.ry) ** 2 < 1; };
+const inShade = t => trees().some(o => { const L = treeLook(o); return ((t.x - o.x - L.lean) / L.R) ** 2 + ((t.y - o.y + 10) / (L.R * 0.72)) ** 2 < 1; });
+function onLookout(t) { // 0 = on the ground, 1 = up on the plateau
+  const o = objOf('lookout'); if (!o) return 0;
+  const { rx, ry } = rockDims(o), e = ((t.x - o.x) / (rx * 0.8)) ** 2 + ((t.y - o.y + ry * 0.12) / (ry * 0.72)) ** 2;
+  return clamp((1 - e) * 4, 0, 1);
+}
+
 // ---------- hidden moods: no bars, you read them off the turtle (and the ⋯ menu) ----------
 const MOOD = { lonely: 30, tired: 25, cold: 35, chubby: 0.45 };
 const inHut = t => { const h = objOf('hut'); return !!h && dist(t, h) < HUT.r; };
+const inCave = t => near('cave', t, CAVE.r);
 const friendNear = (t, k) => turtles.some(o => o !== t && o.releasing === undefined && dist(o, t) < (o.S + t.S) * k);
 function craving(t) { // ate the same thing 4 times running: now wants the other one
   const d = t.diet, last = d[d.length - 1];
@@ -777,21 +870,29 @@ function wakeUp(t) { // nobody likes being woken up
 }
 
 function updateStats(dt) {
-  const warm = nearLamp(T), asleep = T.rest?.kind === 'sleep', dk = darkness(), hutIn = inHut(T), cuddle = asleep && friendNear(T, 1.4);
+  const warm = nearLamp(T), asleep = T.rest?.kind === 'sleep', dk = darkness(), hutIn = inHut(T), cuddle = asleep && friendNear(T, onBed(T) ? 2 : 1.4);
   // loneliness: friendly turtles need company more; cured by petting, bumping into friends, sleeping in a pile
   st.social = clamp(st.social + dt * (cuddle ? 0.6 : T.rest?.kind === 'mirror' ? 0.4 : -0.05 * lerp(0.3, 1.6, T.traits.friendly)), 0, 100);
   // energy: drains while awake, back with sleep (best in the hut, worse under the lamp)
-  st.energy = clamp(st.energy + dt * (asleep ? (hutIn ? 1 : 0.6) * (warm ? 0.5 : 1) : T.rest?.kind === 'bask' ? 0.1 : -0.03 * lerp(0.8, 1.25, T.traits.playful)), 0, 100);
+  const caveIn = inCave(T), bedIn = onBed(T), shade = inShade(T) && dk < 0.3, rockR = T.rest?.kind === 'bask' && ROCKS[T.rest.on];
+  const heated = near('heatrock', T, ROCKS.heatrock.rx * sizeK('heatrock') + 30), misty = near('fog', T, FOG_R);
+  st.energy = clamp(st.energy + dt * (asleep ? (hutIn || caveIn ? 1 : bedIn ? 1.1 : 0.6) * (warm ? 0.5 : 1) : rockR?.nap ? 0.5 : T.rest?.kind === 'bask' ? 0.1 : -0.03 * lerp(0.8, 1.25, T.traits.playful) * (shade ? 0.5 : 1)), 0, 100);
   if (st.energy <= 2 && !asleep && !T.eat && T.drinkT <= 0 && !T.userTarget && !T.sliding) { T.rest = { kind: 'sleep', t: 30 }; T.outing = null; } // dozes off right where it is
   // warmth: nights are chilly away from the lamp, the hut or a sleeping buddy
-  const cold = dk > 0.5 && !warm && !hutIn && !cuddle;
-  st.warm = clamp(st.warm + dt * (warm ? 0.8 : hutIn || cuddle ? 0.3 : cold ? -(T.swim ? 0.12 : 0.05) * dk : T.rest?.kind === 'bask' ? 0.5 : 0.15), 0, 100);
+  const cold = dk > 0.5 && !warm && !heated && !hutIn && !cuddle && !caveIn && !(asleep && bedIn);
+  st.warm = clamp(st.warm + dt * (warm || heated ? 0.8 : hutIn || cuddle ? 0.3 : cold ? -(T.swim ? 0.12 : 0.05) * dk : caveIn || bedIn ? 0 : T.rest?.kind === 'bask' ? 0.5 + (rockR?.sun || 0) * 0.5 : 0.15), 0, 100);
+  // perks of the spot it's in
+  if (rockR?.sun && dk < 0.3) st.happy = clamp(st.happy + dt * 0.5 * rockR.sun, 0, 100);
+  if (rockR?.shy) st.happy = clamp(st.happy + dt * (1 - T.traits.friendly) * 0.8, 0, 100);
+  if (rockR?.climb) st.happy = clamp(st.happy + dt * 0.35, 0, 100); // what a view
+  if (shade) st.happy = clamp(st.happy + dt * 0.15, 0, 100);
+  if (misty) st.happy = clamp(st.happy + dt * 0.25, 0, 100);
   // weight: berries and overeating add (see think), exercise and time take it off
   T.chub = clamp(T.chub - dt * (0.00005 + (T.v > 20 ? 0.0003 : 0) + (T.swim ? 0.0015 : 0)), 0, 1);
   st.hunger = clamp(st.hunger - dt * 0.12 * lerp(0.75, 1.35, T.traits.appetite) * (warm ? 0.7 : 1) * (asleep ? 0.6 : 1), 0, 100);
   if (warm) st.happy = clamp(st.happy + dt * 0.15, 0, 100);
-  if (T.mud > 0) { T.mud = Math.max(0, T.mud - dt / 900); if (T.mud < 0.75) st.happy = clamp(st.happy - dt * 0.04, 0, 100); } // dried mud itches
-  st.thirst = clamp(st.thirst - dt * 0.15, 0, 100);
+  if (T.mud > 0) { if (!misty) T.mud = Math.max(0, T.mud - dt / 900); /* mist keeps mud soft */ if (T.mud < 0.75) st.happy = clamp(st.happy - dt * 0.04, 0, 100); } // dried mud itches
+  st.thirst = clamp(st.thirst - dt * 0.15 * (misty ? 0.5 : 1), 0, 100);
   let drain = (0.05 + poops.length * 0.04) * lerp(0.8, 1.25, T.traits.playful); // playful ones get bored faster
   if (st.hunger < 30) drain += 0.12;
   if (st.thirst < 30) drain += 0.12;
@@ -1089,13 +1190,19 @@ function drawBowl(time) {
     c.strokeStyle = '#ffffff66'; c.lineWidth = 2;
     c.beginPath(); c.arc(x, y, wr * (0.5 + 0.2 * Math.sin(time * 2)), -2.4, -1.2); c.stroke();
   }
+  if (r > 80) { // grand fountain: stone rim and a raised middle basin
+    for (let i = 0; i < 28; i++) { const a = i / 28 * Math.PI * 2; c.fillStyle = ['#b9b2a6', '#a59e92', '#c9c2b5'][i % 3]; c.beginPath(); c.ellipse(x + Math.cos(a) * (r - 3), y + Math.sin(a) * (r - 3), 11, 8, a, 0, 7); c.fill(); }
+    c.fillStyle = '#9aa9b2'; c.beginPath(); c.arc(x, y, r * 0.3, 0, 7); c.fill();
+    c.fillStyle = '#5fb0dd'; c.beginPath(); c.arc(x, y, r * 0.24, 0, 7); c.fill();
+  }
   if (BOWLS[up.bowl].refill) { // fountain spout in the middle
     c.fillStyle = '#9fb3bf'; c.beginPath(); c.arc(x, y, 9, 0, 7); c.fill();
     c.fillStyle = '#d6e2e8'; c.beginPath(); c.arc(x - 2, y - 2, 4, 0, 7); c.fill();
     c.strokeStyle = '#bfe4fa'; c.lineWidth = 2;
     for (let i = 0; i < 6; i++) {
       const a = i / 6 * Math.PI * 2 + time, k = (time * 1.5 + i / 6) % 1;
-      c.globalAlpha = 1 - k; c.beginPath(); c.arc(x + Math.cos(a) * (8 + k * 20), y + Math.sin(a) * (8 + k * 20), 1.8, 0, 7); c.stroke();
+      const reach = r > 80 ? r * 0.55 : 20;
+      c.globalAlpha = 1 - k; c.beginPath(); c.arc(x + Math.cos(a) * (8 + k * reach), y + Math.sin(a) * (8 + k * reach), 1.8, 0, 7); c.stroke();
     }
     c.globalAlpha = 1;
   }
@@ -1281,6 +1388,9 @@ function lights() {
   const L = [];
   const lamp = objOf('lamp');
   if (lamp) L.push({ x: lamp.x, y: lamp.y, r: LAMP_R * 1.3, k: 1, warm: true });
+  const hr = objOf('heatrock'), fog = objOf('fog');
+  if (hr) L.push({ x: hr.x, y: hr.y, r: 150 * sizeK('heatrock'), k: 0.7, warm: true });
+  if (fog) L.push({ x: fog.x, y: fog.y, r: FOG_R * 1.1, k: 0.45 });
   for (const o of objs) if (o.kind === 'deco' && o.type === 'lantern') L.push({ x: o.x, y: o.y, r: 95, k: 0.95, warm: true });
   for (const f of flies) L.push({ x: f.x, y: f.y, r: 18, k: 0.6 * (0.5 + 0.5 * Math.sin(f.ph * 3)) });
   return L;
@@ -1335,6 +1445,205 @@ function drawFlies(dk) {
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, 9, 0, 7); ctx.fill();
   }
   ctx.globalCompositeOperation = 'source-over';
+}
+
+// ---------- moss bed, fog machine, stone cave, shade tree ----------
+function drawMossBed(o) {
+  const c = ctx, rnd = seeded(o.seed || 0.61);
+  c.fillStyle = '#0002'; c.beginPath(); c.ellipse(o.x + 4, o.y + 6, BED.rx, BED.ry, 0, 0, 7); c.fill();
+  c.fillStyle = '#7a5a36'; c.beginPath(); c.ellipse(o.x, o.y, BED.rx, BED.ry, 0, 0, 7); c.fill(); // twig rim
+  c.fillStyle = '#5c8f3a'; c.beginPath(); c.ellipse(o.x, o.y, BED.rx - 8, BED.ry - 7, 0, 0, 7); c.fill();
+  for (let i = 0; i < 26; i++) {
+    const a = rnd() * 6.28, d = Math.sqrt(rnd()) * 0.85;
+    c.fillStyle = ['#6fa84a', '#4f7f30', '#88bf5c'][i % 3];
+    c.beginPath(); c.arc(o.x + Math.cos(a) * (BED.rx - 10) * d, o.y + Math.sin(a) * (BED.ry - 9) * d, 4 + rnd() * 5, 0, 7); c.fill();
+  }
+  c.strokeStyle = '#5a3f22'; c.lineWidth = 2;
+  for (let i = 0; i < 14; i++) { const a = i / 14 * 6.28; c.beginPath(); c.moveTo(o.x + Math.cos(a) * (BED.rx - 3), o.y + Math.sin(a) * (BED.ry - 3)); c.lineTo(o.x + Math.cos(a + 0.3) * (BED.rx + 2), o.y + Math.sin(a + 0.3) * (BED.ry + 1)); c.stroke(); }
+}
+function drawFogMachine(o, time) {
+  const c = ctx;
+  c.fillStyle = '#0003'; c.beginPath(); c.roundRect(o.x - 16, o.y - 8, 34, 26, 5); c.fill();
+  c.fillStyle = '#5d6b78'; c.beginPath(); c.roundRect(o.x - 18, o.y - 12, 34, 26, 5); c.fill();
+  c.fillStyle = '#7e8d9a'; c.beginPath(); c.roundRect(o.x - 15, o.y - 10, 28, 9, 3); c.fill();
+  c.fillStyle = '#3a454f'; c.beginPath(); c.arc(o.x - 1, o.y - 14, 6, 0, 7); c.fill(); // nozzle
+  c.fillStyle = Math.sin(time * 4) > 0 ? '#7fe0ff' : '#3a8fb0'; c.beginPath(); c.arc(o.x + 9, o.y + 6, 2.5, 0, 7); c.fill();
+}
+function drawMist(o, time, dk) {
+  const c = ctx, col = dk > 0.4 ? '190,215,255' : '255,255,255';
+  for (let i = 0; i < 14; i++) { // puffs drift out from the nozzle and fade
+    const k = (time * 0.07 + i / 14) % 1, a = i * 2.39 + Math.sin(time * 0.2 + i) * 0.3, d = 12 + k * FOG_R;
+    const x = o.x + Math.cos(a) * d, y = o.y - 14 + Math.sin(a) * d * 0.7, r = 26 + k * 56;
+    const g = c.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(${col},${0.42 * Math.sin(k * Math.PI)})`); g.addColorStop(0.5, `rgba(${col},${0.2 * Math.sin(k * Math.PI)})`); g.addColorStop(1, `rgba(${col},0)`);
+    c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+  }
+}
+function drawCave(o, layer, a = 1) {
+  const c = ctx, r = CAVE.r, rnd = seeded(o.seed || 0.23);
+  c.save(); c.translate(o.x, o.y);
+  if (layer === 'floor') {
+    c.fillStyle = '#0003'; c.beginPath(); c.ellipse(7, 9, r * 1.1, r * 0.95, 0, 0, 7); c.fill();
+    c.fillStyle = '#3d3934'; c.beginPath(); c.ellipse(0, 0, r * 1.1, r * 0.95, 0, 0, 7); c.fill(); // cool stone floor
+    c.fillStyle = '#4a4540'; for (let i = 0; i < 8; i++) { c.beginPath(); c.ellipse((rnd() - 0.5) * r * 1.4, (rnd() - 0.5) * r * 1.2, 8 + rnd() * 10, 5 + rnd() * 6, rnd() * 3, 0, 7); c.fill(); }
+    c.restore(); return;
+  }
+  c.globalAlpha = a;
+  c.fillStyle = '#6f6a63'; c.beginPath(); c.ellipse(0, 0, r * 1.1, r * 0.95, 0, 0, 7); c.fill();
+  for (let i = 0; i < 9; i++) { // boulders piled into a dome
+    const a2 = rnd() * 6.28, d = rnd() * 0.6;
+    c.fillStyle = ['#8a847b', '#7b756d', '#9a948a'][i % 3];
+    c.beginPath(); c.ellipse(Math.cos(a2) * r * d, Math.sin(a2) * r * d * 0.8 - 6, r * (0.28 + rnd() * 0.18), r * (0.22 + rnd() * 0.14), a2, 0, 7); c.fill();
+  }
+  c.fillStyle = '#b2aca1'; c.beginPath(); c.ellipse(-r * 0.25, -r * 0.4, r * 0.25, r * 0.12, -0.3, 0, 7); c.fill();
+  c.fillStyle = '#1d1a16'; c.beginPath(); c.ellipse(0, r * 0.72, r * 0.42, r * 0.32, 0, Math.PI, 0); c.fill(); // the opening
+  c.globalAlpha = 1;
+  c.strokeStyle = '#57524b'; c.lineWidth = 4; c.beginPath(); c.ellipse(0, 0, r * 1.1, r * 0.95, 0, 0, 7); c.stroke();
+  c.restore();
+}
+function drawTrunk(o) {
+  const c = ctx, L = treeLook(o);
+  c.fillStyle = '#0002'; c.beginPath(); c.ellipse(o.x + L.lean + 18, o.y + 24, L.R, L.R * 0.7, 0, 0, 7); c.fill(); // shade on the ground
+  c.strokeStyle = '#4a3019'; c.lineWidth = 7; c.lineCap = 'round'; // roots
+  for (const a of [0.4, 1.6, 2.7, 4.2, 5.5]) { c.beginPath(); c.moveTo(o.x, o.y + 8); c.lineTo(o.x + Math.cos(a) * L.R * 0.16, o.y + 8 + Math.sin(a) * L.R * 0.1); c.stroke(); }
+  c.fillStyle = '#5a3c20'; c.beginPath(); c.ellipse(o.x, o.y + 8, L.R * 0.12, L.R * 0.08, 0, 0, 7); c.fill();
+}
+function drawTree(o, time) {
+  const c = ctx, L = treeLook(o), cx = o.x + L.lean, cy = o.y - 10;
+  const under = turtles.some(t => ((t.x - cx) / L.R) ** 2 + ((t.y - cy) / (L.R * 0.72)) ** 2 < 1);
+  o.fade = lerp(o.fade ?? 1, under ? 0.5 : 0.95, 0.08); // see-through while someone naps underneath
+  c.save(); c.globalAlpha = o.fade;
+  const sway = Math.sin(time * 0.8 + o.x) * 2;
+  c.fillStyle = `hsl(${L.hue},${L.sat}%,${L.light - 8}%)`; // dark underside first
+  for (const b of L.blobs) { c.beginPath(); c.arc(cx + b.x + 6, cy + b.y + 8, b.r, 0, 7); c.fill(); }
+  for (const b of L.blobs) { c.fillStyle = `hsl(${L.hue},${L.sat}%,${b.l}%)`; c.beginPath(); c.arc(cx + b.x + sway, cy + b.y, b.r, 0, 7); c.fill(); }
+  c.fillStyle = `hsla(${L.hue + 8},${L.sat + 10}%,${L.light + 16}%,0.55)`; // sunlit tufts on top
+  for (const t of L.tufts) { c.beginPath(); c.arc(cx + t.x + sway, cy + t.y, t.r, 0, 7); c.fill(); }
+  c.fillStyle = L.dotCol; // blossoms or fruit
+  for (const d of L.dots) { c.beginPath(); c.arc(cx + d.x + sway, cy + d.y, d.r, 0, 7); c.fill(); }
+  c.restore();
+}
+
+// ---------- wildlife: just for looks (not saved) ----------
+// butterflies by day, dragonflies and frogs once there's a pond, birds that hop about and flee from turtles
+let bugs = [], frogs = [], birds = [];
+function updateLife(dt, dk) {
+  const day = dk < 0.4, pond = objOf('pond');
+  const flowers = objs.filter(o => o.kind === 'deco' && (o.type === 'flowers' || o.type === 'bush'));
+  const wantB = day ? 3 + up.yard * 2 + flowers.length : 0, wantD = day && pond ? 2 + (up.size.pond || 0) : 0;
+  const nB = bugs.filter(b => !b.drag).length, nD = bugs.length - nB;
+  if (nB < wantB) bugs.push({ x: rand(40, YW - 40), y: rand(40, YH - 40), vx: 0, vy: 0, t: rand(0, 9), hue: [330, 45, 200, 280, 20][Math.floor(rand(0, 5))], tgt: null });
+  if (nD < wantD) bugs.push({ drag: true, x: pond.x, y: pond.y, vx: 0, vy: 0, t: rand(0, 9), hue: rand(150, 200), tgt: null, hold: 0 });
+  if (nB > wantB || nD > wantD) bugs = bugs.filter(b => (b.drag ? nD <= wantD : nB <= wantB)); // night: they all go home
+  for (const b of bugs) {
+    b.t += dt;
+    if (b.drag) { // dart, hover, dart
+      if (!pond) { b.gone = true; continue; }
+      if ((b.hold -= dt) <= 0 || !b.tgt) { b.tgt = { x: pond.x + rand(-1, 1) * POND.rx * 1.1, y: pond.y + rand(-1, 1) * POND.ry * 1.1 }; b.hold = rand(0.6, 2); }
+      b.x = lerp(b.x, b.tgt.x, Math.min(1, dt * 5)); b.y = lerp(b.y, b.tgt.y, Math.min(1, dt * 5));
+    } else { // flutter toward a flower or a random spot
+      if (!b.tgt || dist(b, b.tgt) < 12 || Math.random() < dt * 0.1) {
+        const f = flowers.length && Math.random() < 0.6 ? flowers[Math.floor(rand(0, flowers.length))] : null;
+        b.tgt = f ? { x: f.x, y: f.y - 8 } : { x: rand(40, YW - 40), y: rand(40, YH - 40) };
+      }
+      const a = Math.atan2(b.tgt.y - b.y, b.tgt.x - b.x);
+      b.vx = lerp(b.vx, Math.cos(a) * 45 + Math.sin(b.t * 7) * 30, dt * 2); b.vy = lerp(b.vy, Math.sin(a) * 45 + Math.cos(b.t * 5) * 30, dt * 2);
+      b.x += b.vx * dt; b.y += b.vy * dt;
+    }
+  }
+  bugs = bugs.filter(b => !b.gone);
+  // frogs sit at the pond edge, hop away from turtles, croak at night
+  const wantF = pond ? 2 + (up.size.pond || 0) : 0;
+  while (frogs.length < wantF) { const a = rand(0, 7); frogs.push({ a, x: pond.x + Math.cos(a) * POND.rx * 1.05, y: pond.y + Math.sin(a) * POND.ry * 1.05, hop: 0, from: null, to: null, croak: rand(2, 8), face: a }); }
+  if (frogs.length > wantF) frogs.length = wantF;
+  for (const f of frogs) {
+    if (f.hop > 0) {
+      f.hop = Math.max(0, f.hop - dt * 2.2); const k = 1 - f.hop;
+      f.x = lerp(f.from.x, f.to.x, k); f.y = lerp(f.from.y, f.to.y, k) - Math.sin(k * Math.PI) * 18;
+      if (!f.hop) emit(f.x, f.y, 'ripple');
+      continue;
+    }
+    const scared = turtles.some(t => dist(t, f) < t.S + 40);
+    if (scared || Math.random() < dt * 0.05) { // hop somewhere else round the pond
+      f.a += rand(0.6, 1.6) * (Math.random() < 0.5 ? -1 : 1);
+      f.from = { x: f.x, y: f.y }; f.to = { x: pond.x + Math.cos(f.a) * POND.rx * 1.05, y: pond.y + Math.sin(f.a) * POND.ry * 1.05 };
+      f.face = Math.atan2(f.to.y - f.y, f.to.x - f.x); f.hop = 1;
+    }
+    if (dk > 0.5 && (f.croak -= dt) <= 0) { f.croak = rand(4, 12); emit(f.x, f.y - 8, 'note'); }
+  }
+  // birds land, peck, and fly off when a turtle gets close
+  const wantBird = day ? 1 + Math.min(4, up.yard) : 0;
+  if (birds.length < wantBird && Math.random() < dt * 0.15) {
+    const side = Math.random() < 0.5 ? -60 : YW + 60, to = { x: rand(60, YW - 60), y: rand(60, YH - 60) };
+    birds.push({ x: side, y: to.y - 120, to, fly: true, peck: 0, t: 0, face: side < 0 ? 0 : Math.PI, hue: [25, 10, 210][Math.floor(rand(0, 3))] });
+  }
+  for (const b of birds) {
+    b.t += dt;
+    if (b.fly) {
+      const a = Math.atan2(b.to.y - b.y, b.to.x - b.x), d = dist(b, b.to);
+      b.face = a; b.x += Math.cos(a) * Math.min(d, 160 * dt); b.y += Math.sin(a) * Math.min(d, 160 * dt);
+      if (d < 2) { if (b.leaving) b.gone = true; else b.fly = false; }
+      continue;
+    }
+    b.peck = Math.max(0, b.peck - dt);
+    if (Math.random() < dt * 0.8) b.peck = 0.3;
+    if (Math.random() < dt * 0.4) { const a = rand(0, 7); b.to = { x: clamp(b.x + Math.cos(a) * 18, 30, YW - 30), y: clamp(b.y + Math.sin(a) * 18, 30, YH - 30) }; b.face = a; b.x = b.to.x; b.y = b.to.y; }
+    if (!day || turtles.some(t => dist(t, b) < t.S + 50) || b.t > 40) { // away!
+      b.fly = true; b.leaving = true; b.to = { x: b.x + (b.x < YW / 2 ? -1 : 1) * 500, y: b.y - 300 };
+    }
+  }
+  birds = birds.filter(b => !b.gone);
+}
+function drawGroundLife(v) {
+  const c = ctx;
+  for (const f of frogs) {
+    if (!inView(f, 20, v)) continue;
+    c.save(); c.translate(f.x, f.y); c.rotate(f.face + Math.PI / 2);
+    c.fillStyle = '#0002'; c.beginPath(); c.ellipse(1, 3, 8, 7, 0, 0, 7); c.fill();
+    c.fillStyle = '#5c9a3a'; c.beginPath(); c.ellipse(0, 0, 7, 8, 0, 0, 7); c.fill();
+    c.fillStyle = '#4a7f2e'; c.beginPath(); c.ellipse(-6, 4, 3.5, 5, -0.4, 0, 7); c.ellipse(6, 4, 3.5, 5, 0.4, 0, 7); c.fill();
+    c.fillStyle = '#e8f0c0'; c.beginPath(); c.arc(-3, -6, 2.6, 0, 7); c.arc(3, -6, 2.6, 0, 7); c.fill();
+    c.fillStyle = '#111'; c.beginPath(); c.arc(-3, -6.4, 1.3, 0, 7); c.arc(3, -6.4, 1.3, 0, 7); c.fill();
+    c.restore();
+  }
+  for (const b of birds) if (!b.fly && inView(b, 20, v)) drawBird(b);
+}
+function drawBird(b) {
+  const c = ctx, body = `hsl(${b.hue},35%,${b.hue > 100 ? 45 : 38}%)`;
+  c.save(); c.translate(b.x, b.y); c.rotate(b.face);
+  if (!b.fly) { c.fillStyle = '#0002'; c.beginPath(); c.ellipse(1, 3, 7, 4, 0, 0, 7); c.fill(); }
+  c.fillStyle = body;
+  if (b.fly) { const w = Math.sin(b.t * 22) * 9; c.beginPath(); c.ellipse(-1, -4 - w * 0.4, 4, 9, -0.3, 0, 7); c.ellipse(-1, 4 + w * 0.4, 4, 9, 0.3, 0, 7); c.fill(); }
+  c.beginPath(); c.ellipse(0, 0, 7, 4.5, 0, 0, 7); c.fill(); // body
+  c.beginPath(); c.moveTo(-6, 0); c.lineTo(-11, -3); c.lineTo(-11, 3); c.closePath(); c.fill(); // tail
+  const hx = b.peck > 0 ? 8 : 6;
+  c.beginPath(); c.arc(hx, 0, 3.4, 0, 7); c.fill();
+  c.fillStyle = '#e8a63a'; c.beginPath(); c.moveTo(hx + 3, -1); c.lineTo(hx + 6, 0); c.lineTo(hx + 3, 1); c.closePath(); c.fill();
+  c.fillStyle = '#111'; c.beginPath(); c.arc(hx + 1, -1.6, 0.8, 0, 7); c.arc(hx + 1, 1.6, 0.8, 0, 7); c.fill();
+  c.restore();
+}
+function drawAirLife(v) {
+  const c = ctx;
+  for (const b of bugs) {
+    if (!inView(b, 20, v)) continue;
+    if (b.drag) {
+      c.save(); c.translate(b.x, b.y); c.rotate(Math.atan2(b.tgt.y - b.y, b.tgt.x - b.x));
+      c.strokeStyle = `hsl(${b.hue},70%,40%)`; c.lineWidth = 2; c.beginPath(); c.moveTo(-10, 0); c.lineTo(5, 0); c.stroke();
+      c.fillStyle = '#e6f6ff88'; const fl = Math.sin(b.t * 60) * 0.3;
+      for (const [x, s] of [[1, 1], [1, -1], [-2, 1], [-2, -1]]) { c.beginPath(); c.ellipse(x, s * 5, 2.2, 6, s * (0.3 + fl), 0, 7); c.fill(); }
+      c.restore();
+    } else {
+      const f = Math.abs(Math.sin(b.t * 14)) * 0.8 + 0.2, col = `hsl(${b.hue},80%,62%)`;
+      c.save(); c.translate(b.x, b.y); c.scale(1.7, 1.7);
+      c.fillStyle = '#0001'; c.beginPath(); c.ellipse(4, 14, 4, 2, 0, 0, 7); c.fill(); // shadow on the ground
+      c.fillStyle = col;
+      c.beginPath(); c.ellipse(-3 * f, -1, 4 * f, 4.5, -0.3, 0, 7); c.ellipse(3 * f, -1, 4 * f, 4.5, 0.3, 0, 7); c.fill();
+      c.beginPath(); c.ellipse(-2.4 * f, 3, 3 * f, 3, 0.3, 0, 7); c.ellipse(2.4 * f, 3, 3 * f, 3, -0.3, 0, 7); c.fill();
+      c.strokeStyle = '#2a2a2a'; c.lineWidth = 1.2; c.beginPath(); c.moveTo(0, -4); c.lineTo(0, 5); c.stroke();
+      c.restore();
+    }
+  }
+  for (const b of birds) if (b.fly && inView(b, 30, v)) drawBird(b);
 }
 
 // ---------- decorations ----------
@@ -1475,21 +1784,84 @@ function drawPond(o, time) {
   }
   c.restore();
 }
-function drawRock(o) {
-  const c = ctx, { rx, ry } = ROCK;
-  c.fillStyle = '#0002'; c.beginPath(); c.ellipse(o.x + 5, o.y + 7, rx, ry, 0.2, 0, 7); c.fill();
-  c.fillStyle = '#9b9286'; c.beginPath(); c.ellipse(o.x, o.y, rx, ry, 0.2, 0, 7); c.fill();
-  c.fillStyle = '#b3aa9d'; c.beginPath(); c.ellipse(o.x - 6, o.y - 5, rx * 0.72, ry * 0.62, 0.2, 0, 7); c.fill();
-  c.fillStyle = '#c8bfb2'; c.beginPath(); c.ellipse(o.x - 14, o.y - 10, rx * 0.3, ry * 0.22, 0.2, 0, 7); c.fill();
+function drawRock(o, time = 0, dk = 0) {
+  const c = ctx, R = ROCKS[o.kind] || ROCKS.rock, { rx, ry } = rockDims(o), [dark, mid, light] = R.col, rnd = seeded(o.seed || 0.37);
+  c.save(); c.translate(o.x, o.y);
+  const blob = (sx, sy, w, h, rot, n = 9, j = 0.12) => { // a lumpy rounded stone outline
+    c.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const a = i / n * Math.PI * 2, k = 1 + Math.sin(a * 3 + rot * 5) * j;
+      const x = sx + Math.cos(a) * w * k, y = sy + Math.sin(a) * h * k;
+      i ? c.lineTo(x, y) : c.moveTo(x, y);
+    }
+    c.closePath();
+  };
+  if (R.look === 'lookout') {
+    c.fillStyle = '#0003'; blob(14, 18, rx, ry, 0.2, 14, 0.06); c.fill();
+    c.fillStyle = dark; blob(0, 0, rx, ry, 0.2, 14, 0.07); c.fill();
+    c.strokeStyle = '#6a5f53'; c.lineWidth = 3; // cliff face: vertical cracks down the front
+    for (let i = 0; i < 9; i++) { const x = -rx * 0.75 + i * rx * 0.19; c.beginPath(); c.moveTo(x, ry * 0.35); c.lineTo(x + 4, ry * 0.85 - Math.abs(x / rx) * ry * 0.4); c.stroke(); }
+    c.fillStyle = '#7a6f62'; // a path of steps up the front-left
+    for (let i = 0; i < 5; i++) { c.beginPath(); c.ellipse(-rx * 0.55 + i * rx * 0.08, ry * 0.7 - i * ry * 0.16, 16, 9, 0.3, 0, 7); c.fill(); }
+    c.fillStyle = mid; blob(0, -ry * 0.1, rx * 0.86, ry * 0.8, 0.6, 12, 0.06); c.fill();
+    c.fillStyle = light; blob(0, -ry * 0.14, rx * 0.74, ry * 0.64, 0.9, 12, 0.05); c.fill(); // the plateau
+    c.fillStyle = mid; c.beginPath(); c.moveTo(rx * 0.55, -ry * 0.55); c.lineTo(rx * 1.12, -ry * 0.78); c.lineTo(rx * 1.05, -ry * 0.6); c.lineTo(rx * 0.7, -ry * 0.3); c.closePath(); c.fill(); // jutting ledge
+    c.fillStyle = light; c.beginPath(); c.moveTo(rx * 0.6, -ry * 0.55); c.lineTo(rx * 1.1, -ry * 0.77); c.lineTo(rx * 0.75, -ry * 0.42); c.closePath(); c.fill();
+    c.strokeStyle = '#6e6356'; c.lineWidth = 2;
+    for (let i = 0; i < 6; i++) { const a = rnd() * 6.28, d = rnd() * 0.6; c.beginPath(); c.moveTo(Math.cos(a) * rx * d, Math.sin(a) * ry * d - ry * 0.12); c.lineTo(Math.cos(a) * rx * d + 14, Math.sin(a) * ry * d - ry * 0.12 + 6); c.stroke(); }
+    c.fillStyle = '#6f9a3c88'; for (let i = 0; i < 4; i++) { c.beginPath(); c.ellipse((rnd() - 0.5) * rx * 1.6, (rnd() - 0.2) * ry * 0.9, 14, 7, 0, 0, 7); c.fill(); }
+  } else if (R.look === 'slab') {
+    c.fillStyle = '#0002'; c.beginPath(); c.roundRect(-rx + 6, -ry + 8, rx * 2, ry * 2, 10); c.fill();
+    c.fillStyle = dark; c.beginPath(); c.roundRect(-rx, -ry, rx * 2, ry * 2, 10); c.fill();
+    c.fillStyle = mid; c.beginPath(); c.roundRect(-rx + 4, -ry + 3, rx * 2 - 8, ry * 2 - 10, 8); c.fill();
+    c.strokeStyle = dark; c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(-rx * 0.3, -ry + 4); c.lineTo(-rx * 0.22, ry - 8); c.moveTo(rx * 0.4, -ry + 4); c.lineTo(rx * 0.33, ry * 0.2); c.stroke();
+    c.fillStyle = light; c.beginPath(); c.roundRect(-rx + 10, -ry + 7, rx * 0.8, ry * 0.5, 6); c.fill();
+  } else {
+    const n = R.look === 'lumpy' ? 7 : 10, j = R.look === 'lumpy' ? 0.16 : 0.08;
+    c.fillStyle = '#0002'; blob(5, 7, rx, ry, 0.2, n, j); c.fill();
+    c.fillStyle = dark; blob(0, 0, rx, ry, 0.2, n, j); c.fill();
+    c.fillStyle = mid; blob(-5, -5, rx * 0.78, ry * 0.66, 0.5, n, j); c.fill();
+    c.fillStyle = light; c.beginPath(); c.ellipse(-rx * 0.25, -ry * 0.3, rx * 0.3, ry * 0.22, 0.2, 0, 7); c.fill();
+    if (R.look === 'layers') { // sandstone stripes
+      c.strokeStyle = '#b27740aa'; c.lineWidth = 2.5;
+      for (const yy of [-0.35, 0, 0.35]) { c.beginPath(); c.ellipse(0, yy * ry, rx * 0.86, ry * 0.18, 0, 0.15, Math.PI - 0.15); c.stroke(); }
+    }
+    if (R.look === 'lumpy') { c.fillStyle = '#8a4a30'; for (let i = 0; i < 5; i++) { c.beginPath(); c.arc((rnd() - 0.5) * rx * 1.2, (rnd() - 0.5) * ry * 1.1, 3 + rnd() * 3, 0, 7); c.fill(); } }
+    if (R.look === 'moss') {
+      c.fillStyle = '#5f8f3a'; for (let i = 0; i < 7; i++) { c.beginPath(); c.ellipse((rnd() - 0.5) * rx * 1.3, (rnd() - 0.6) * ry * 1.1, 8 + rnd() * 10, 5 + rnd() * 6, rnd() * 3, 0, 7); c.fill(); }
+      c.fillStyle = '#7fb24e'; for (let i = 0; i < 6; i++) { c.beginPath(); c.arc((rnd() - 0.5) * rx * 1.1, (rnd() - 0.6) * ry, 3 + rnd() * 3, 0, 7); c.fill(); }
+    }
+    if (R.look === 'heat') { // glowing cracks
+      const glow = 0.55 + 0.25 * Math.sin(time * 2) + dk * 0.3;
+      c.strokeStyle = `rgba(255,${120 + dk * 40 | 0},40,${clamp(glow, 0, 1)})`; c.lineWidth = 2.5; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(-rx * 0.5, -ry * 0.1); c.lineTo(-rx * 0.15, ry * 0.15); c.lineTo(rx * 0.2, -ry * 0.05); c.lineTo(rx * 0.5, ry * 0.2);
+      c.moveTo(-rx * 0.15, ry * 0.15); c.lineTo(-rx * 0.05, ry * 0.5); c.moveTo(rx * 0.2, -ry * 0.05); c.lineTo(rx * 0.1, -ry * 0.45); c.stroke();
+    }
+  }
+  c.restore();
 }
-function drawLog(o) {
+// Hut, cave and log tunnel draw in two passes: a floor under the turtles and a roof over them.
+// While a turtle is inside, the roof fades see-through (outline stays solid) so you can watch it in there.
+function insideOf(o) {
+  if (o.kind === 'hut') return turtles.some(t => dist(t, o) < HUT.r);
+  if (o.kind === 'cave') return turtles.some(t => dist(t, o) < CAVE.r);
+  return turtles.some(t => Math.abs(t.x - o.x) < LOG.len / 2 && Math.abs(t.y - o.y) < LOG.r);
+}
+const roofFade = (o, dt) => (o.fade = lerp(o.fade ?? 1, insideOf(o) ? 0.3 : 1, Math.min(1, dt * 5)));
+function drawLog(o, layer, a = 1) {
   const c = ctx, L = LOG.len, r = LOG.r;
   c.save(); c.translate(o.x, o.y);
-  c.fillStyle = '#0003'; c.beginPath(); c.roundRect(-L / 2 + 5, -r + 9, L, r * 2, r * 0.5); c.fill();
+  if (layer === 'floor') {
+    c.fillStyle = '#0003'; c.beginPath(); c.roundRect(-L / 2 + 5, -r + 9, L, r * 2, r * 0.5); c.fill();
+    c.fillStyle = '#3a2512'; c.beginPath(); c.roundRect(-L / 2, -r * 0.8, L, r * 1.6, r * 0.4); c.fill(); // hollow inside
+    c.fillStyle = '#4a311a'; c.beginPath(); c.roundRect(-L / 2 + 8, -r * 0.35, L - 16, r * 0.7, r * 0.3); c.fill();
+    c.restore(); return;
+  }
+  c.globalAlpha = a;
   const g = c.createLinearGradient(0, -r, 0, r);
   g.addColorStop(0, '#6b4526'); g.addColorStop(0.35, '#8c5f36'); g.addColorStop(1, '#5a3a1f');
   c.fillStyle = g; c.beginPath(); c.roundRect(-L / 2, -r, L, r * 2, r * 0.5); c.fill();
-  c.strokeStyle = '#3e2814'; c.lineWidth = 2; c.stroke();
   c.strokeStyle = '#4a2f18'; c.lineWidth = 1.5;
   for (let i = 0; i < 6; i++) { const y = -r + 8 + i * (r * 2 - 16) / 5; c.beginPath(); c.moveTo(-L / 2 + 14, y); c.bezierCurveTo(-L / 6, y + 4, L / 6, y - 4, L / 2 - 14, y); c.stroke(); }
   c.fillStyle = '#6f9a3c99'; c.beginPath(); c.ellipse(L * 0.15, -r * 0.55, 16, 7, 0, 0, 7); c.fill();
@@ -1498,21 +1870,31 @@ function drawLog(o) {
     c.strokeStyle = '#8a6438'; c.lineWidth = 1; c.beginPath(); c.ellipse(sx * L / 2, 0, r * 0.3, r * 0.82, 0, 0, 7); c.stroke();
     c.fillStyle = '#241608'; c.beginPath(); c.ellipse(sx * L / 2, 0, r * 0.26, r * 0.68, 0, 0, 7); c.fill();
   }
+  c.globalAlpha = 1;
+  c.strokeStyle = '#3e2814'; c.lineWidth = 2; c.beginPath(); c.roundRect(-L / 2, -r, L, r * 2, r * 0.5); c.stroke();
   c.restore();
 }
-function drawHut(o) {
+function drawHut(o, layer, a = 1) {
   const c = ctx, r = HUT.r;
   c.save(); c.translate(o.x, o.y);
-  c.fillStyle = '#0003'; c.beginPath(); c.arc(6, 8, r, 0, 7); c.fill();
+  if (layer === 'floor') {
+    c.fillStyle = '#0003'; c.beginPath(); c.arc(6, 8, r, 0, 7); c.fill();
+    c.fillStyle = '#6b4c22'; c.beginPath(); c.arc(0, 0, r, 0, 7); c.fill(); // straw-strewn floor
+    c.strokeStyle = '#8a6a34'; c.lineWidth = 1.5; const rnd = seeded(o.seed || 0.44);
+    for (let i = 0; i < 18; i++) { const a2 = rnd() * 6.28, d = rnd() * r * 0.8, x = Math.cos(a2) * d, y = Math.sin(a2) * d, t = rnd() * 3; c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(t) * 9, y + Math.sin(t) * 9); c.stroke(); }
+    c.restore(); return;
+  }
+  c.globalAlpha = a;
   const g = c.createRadialGradient(-r * 0.25, -r * 0.3, 4, 0, 0, r);
   g.addColorStop(0, '#ecc874'); g.addColorStop(1, '#b4853a');
   c.fillStyle = g; c.beginPath(); c.arc(0, 0, r, 0, 7); c.fill();
   c.strokeStyle = '#9a6f2e'; c.lineWidth = 1.2;
-  for (let i = 0; i < 40; i++) { const a = i / 40 * Math.PI * 2; c.beginPath(); c.moveTo(Math.cos(a) * 6, Math.sin(a) * 6); c.lineTo(Math.cos(a) * r, Math.sin(a) * r); c.stroke(); }
+  for (let i = 0; i < 40; i++) { const a2 = i / 40 * Math.PI * 2; c.beginPath(); c.moveTo(Math.cos(a2) * 6, Math.sin(a2) * 6); c.lineTo(Math.cos(a2) * r, Math.sin(a2) * r); c.stroke(); }
   c.lineWidth = 2; c.strokeStyle = '#8a6224';
   for (const k of [0.4, 0.72]) { c.beginPath(); c.arc(0, 0, r * k, 0, 7); c.stroke(); }
   c.fillStyle = '#7a5520'; c.beginPath(); c.arc(0, 0, 7, 0, 7); c.fill();
   c.fillStyle = '#2b1d0e'; c.beginPath(); c.ellipse(0, r * 0.86, r * 0.36, r * 0.26, 0, Math.PI, 0); c.fill(); // doorway
+  c.globalAlpha = 1;
   c.strokeStyle = '#6b4a1e'; c.lineWidth = 3; c.beginPath(); c.arc(0, 0, r, 0, 7); c.stroke();
   c.restore();
 }
@@ -1731,9 +2113,9 @@ cv.addEventListener('wheel', e => { // desktop zoom
 }, { passive: false });
 
 const nameOf = o => o === bowl ? BOWLS[up.bowl].name : o.kind === 'feeder' ? FEEDERS[up.feeder].name
-  : o.kind === 'deco' ? DECOS[o.type].name : (AUTO[o.kind] || STRUCTS[o.kind]).name;
-const HIT = { pond: 100, rock: 50, log: 75, hut: HUT.r, garden: 55, mud: 60, slide: 75, mirror: 32, lamp: 30, feeder: 30, deco: 24 };
-const hitR = o => (o === bowl ? bowl.r : o.kind === 'garden' ? gardenCols() * SLOT / 2 + 10 : (HIT[o.kind] || 30) * sizeK(o.kind));
+  : o.kind === 'deco' ? DECOS[o.type].name : (AUTO[o.kind] || STRUCTS[o.kind] || ROCKS[o.kind]).name;
+const HIT = { pond: 100, log: 75, hut: HUT.r, garden: 55, mud: 60, slide: 75, mirror: 32, lamp: 30, feeder: 30, deco: 24, mossbed: 70, fog: 30, cave: 120 };
+const hitR = o => (o === bowl ? bowl.r : ROCKS[o.kind] ? rockDims(o).rx * 0.85 : o.kind === 'garden' ? gardenCols() * SLOT / 2 + 10 : (HIT[o.kind] || 30) * sizeK(o.kind));
 const movables = () => [bowl, ...objs];
 const doneBtn = document.getElementById('arrange-done');
 function startArrange() {
@@ -1818,17 +2200,37 @@ function pet(t) {
 // bought in the shop; each extra turtle costs a bit more
 const adoptCost = () => Math.round(25 * turtles.length ** 1.6 / 5) * 5; // 25, 75, 145 ... ~840 for the 10th
 function adopt() {
-  const used = new Set(turtles.map(t => t.name));
-  const suggestion = NAMES.find(n => !used.has(n)) || `Turtle ${turtles.length + 1}`;
-  const answer = prompt(`Name your new hatchling (blank = ${suggestion}):`, suggestion);
-  const name = ((answer ?? '').trim() || suggestion).slice(0, 14); // already paid, so cancelling keeps the suggested name
+  const suggestion = randomName();
+  const name = suggestion; // the turtle arrives right away; naming it comes after
   shop.hidden = true;
   const t = makeTurtle({ name, tint: pickTint(turtles), x: clamp(cam.x + rand(-80, 80), 60, YW - 60), y: clamp(cam.y + rand(-80, 80), 60, YH - 60), a: rand(-3, 3) });
   turtles.push(t); use(t); resetFeet();
   emit(t.x, t.y, 'sparkle', 12); emit(t.x, t.y - 10, 'heart', 3);
-  sel = t; say(`Welcome, ${name}! Seems ${personality(t.traits).toLowerCase()} 🥚`, 3000); buzz([20, 40, 20]);
+  sel = t; buzz([20, 40, 20]);
   save();
+  askName('Name your new hatchling 🥚', name, n => {
+    t.name = n; save();
+    say(`Welcome, ${n}! Seems ${personality(t.traits).toLowerCase()} 🥚`, 3000);
+  });
 }
+// In-game name box (the browser's prompt() is blocked in some browsers, like kids' tablets).
+// done(name) runs with the typed name (left blank = keep the current one).
+const namer = document.getElementById('namer'), namerIn = namer.querySelector('input');
+let namerDone = null;
+function askName(title, current, done) {
+  namer.querySelector('.title').textContent = title;
+  namerIn.value = current; namerDone = n => done((n || '').trim().slice(0, 14) || current);
+  namer.hidden = false;
+  setTimeout(() => { namerIn.focus(); namerIn.select(); }, 50);
+}
+function closeNamer(ok) {
+  if (namer.hidden) return;
+  namer.hidden = true; namerIn.blur();
+  const f = namerDone; namerDone = null;
+  f?.(ok ? namerIn.value : '');
+}
+namer.querySelector('.ok').onclick = () => closeNamer(true);
+namerIn.addEventListener('keydown', e => { if (e.key === 'Enter') closeNamer(true); });
 document.getElementById('away-ok').onclick = () => { document.getElementById('away').hidden = true; };
 
 // ---------- tap the name label: rename or release ----------
@@ -1851,8 +2253,8 @@ menu.addEventListener('click', e => { if (e.target === menu) menu.hidden = true;
 document.getElementById('m-close').onclick = () => { menu.hidden = true; };
 document.getElementById('m-rename').onclick = () => {
   menu.hidden = true;
-  const name = (prompt(`Rename ${sel.name}:`, sel.name) ?? '').trim().slice(0, 14);
-  if (name) { sel.name = name; save(); }
+  const t = sel;
+  askName(`Rename ${t.name}`, t.name, n => { t.name = n; save(); });
 };
 document.getElementById('m-vet').onclick = () => { menu.hidden = true; if (up.vet > 0) useVet(sel, false); };
 document.getElementById('m-release').onclick = () => {
@@ -1908,7 +2310,12 @@ function buildShop() {
     rows.push(up.toys.includes(k) ? { icon: toy.icon, name: toy.name, desc: toy.desc, done: 'Owned' }
       : { icon: toy.icon, name: toy.name, desc: toy.desc, cost: toy.cost, buy: () => { up.toys.push(k); up.toy = k; if (ball) ball = makeBall(ball.x, ball.y); renderToybar(); say('Pick toys in Play mode 🎾', 2500); } });
   }
-  rows.push({ sec: '🪨 Play structures' });
+  rows.push({ sec: '🪨 Rocks' });
+  for (const [k, rd] of Object.entries(ROCKS)) {
+    if (objOf(k)) rows.push(sizeRow(k, rd));
+    else rows.push({ icon: rd.icon, name: rd.name, desc: rd.desc, cost: rd.cost, locked: rd.needYard && up.yard < rd.needYard ? `Needs a ${YARDS[rd.needYard].name} yard` : null, buy: () => startPlacing(newObj(k)) });
+  }
+  rows.push({ sec: '🛝 Play & rest' });
   for (const [k, sd] of Object.entries(STRUCTS)) {
     if (objOf(k)) rows.push(sizeRow(k, sd));
     else rows.push({ icon: sd.icon, name: sd.name, desc: sd.desc, cost: sd.cost, locked: sd.needYard && up.yard < sd.needYard ? 'Needs a Medium yard' : null, buy: () => startPlacing(newObj(k)) });
@@ -1916,7 +2323,7 @@ function buildShop() {
   rows.push({ sec: '🌷 Decorations' });
   for (const [k, dd] of Object.entries(DECOS)) {
     const n = objs.filter(o => o.kind === 'deco' && o.type === k).length;
-    rows.push({ icon: dd.icon, name: dd.name, desc: (dd.light ? 'Glows at night. ' : '') + (n ? `You have ${n}.` : 'Buy as many as you like.'), cost: dd.cost, buy: () => { const o = newObj('deco'); o.type = k; o.seed = Math.random(); startPlacing(o); } });
+    rows.push({ icon: dd.icon, name: dd.name, desc: (dd.desc ? dd.desc + ' ' : '') + (dd.light ? 'Glows at night. ' : '') + (n ? `You have ${n}.` : 'Buy as many as you like.'), cost: dd.cost + (dd.step || 0) * n, buy: () => { const o = newObj('deco'); o.type = k; o.seed = Math.random(); startPlacing(o); } });
   }
   return rows;
 }
@@ -1953,7 +2360,7 @@ shopList.addEventListener('click', e => {
   if (r.action) return r.action();
   if (stars < r.cost) return;
   stars -= r.cost; buzz([20, 40, 20]);
-  r.buy();
+  try { r.buy(); } catch (err) { stars += r.cost; save(); renderShop(); say('Oops, that didn\'t work. Your stars are back ⭐', 3000); console.error(err); return; }
   emit(cam.x, cam.y, 'sparkle', 10);
   save();
   if (!shop.hidden) renderShop();
@@ -2006,7 +2413,7 @@ function frame(now) {
   if (turtles.some(t => t.releasing !== undefined && (t.releasing -= dt) <= 0)) {
     turtles = turtles.filter(t => !(t.releasing <= 0));
     if (!turtles.length) { // the yard is never empty: a new hatchling wanders in
-      const t = makeTurtle({ name: NAMES[Math.floor(rand(0, NAMES.length))], growth: 0, x: cam.x, y: cam.y });
+      const t = makeTurtle({ name: randomName(), growth: 0, x: cam.x, y: cam.y });
       turtles.push(t); use(t); resetFeet(); graceT = GRACE_SECS;
       setTimeout(() => say(`🥚 A new hatchling, ${t.name}, wandered into your yard`), 1200);
     }
@@ -2034,17 +2441,27 @@ function frame(now) {
   if (objOf('garden')) for (const f of foods) if (f.slot !== undefined) { const sp = slotPos(f.slot); f.x = sp.x; f.y = sp.y; }
   updateCrabs(dt);
   updateFlies(dt, dk, v);
+  updateLife(dt, dk);
 
   // ----- draw (world space) -----
   drawYard(v);
-  const pond = objOf('pond'), rock = objOf('rock'), mud = objOf('mud'), slide = objOf('slide'), lamp = objOf('lamp'), garden = objOf('garden'), mirror = objOf('mirror');
+  const pond = objOf('pond'), mud = objOf('mud'), slide = objOf('slide'), lamp = objOf('lamp'), garden = objOf('garden'), mirror = objOf('mirror');
   if (lamp && inView(lamp, LAMP_R, v)) drawLampGlow(lamp, dk);
   if (pond && inView(pond, POND.rx + 20, v)) drawPond(pond, time);
   if (mud && inView(mud, MUD.rx + 10, v)) drawMud(mud, time);
-  if (rock && inView(rock, 70, v)) drawRock(rock);
+  for (const rk of rocksPlaced()) if (inView(rk, rockDims(rk).rx + 30, v)) drawRock(rk, time, dk);
+  const bed = objOf('mossbed'), fog = objOf('fog'), cave = objOf('cave'), trs = trees();
+  for (const o of trs) if (inView(o, treeLook(o).R + 30, v)) drawTrunk(o);
+  if (bed && inView(bed, BED.rx + 10, v)) drawMossBed(bed);
+  const log = objOf('log'), hut = objOf('hut'); // floors now, roofs after the turtles
+  if (log && inView(log, LOG.len, v)) drawLog(log, 'floor');
+  if (hut && inView(hut, HUT.r + 10, v)) drawHut(hut, 'floor');
+  if (cave && inView(cave, CAVE.r * 1.2, v)) drawCave(cave, 'floor');
+  if (fog && inView(fog, 30, v)) drawFogMachine(fog, time);
+  drawGroundLife(v);
   if (slide && inView(slide, SLIDE.len, v)) drawSlide(slide);
   if (garden && inView(garden, 100, v)) drawGarden(garden, nowMs);
-  for (const o of objs) if (o.kind === 'deco' && !DECOS[o.type].tall && inView(o, 40, v)) drawDeco(o, time, dk);
+  for (const o of objs) if (o.kind === 'deco' && !DECOS[o.type].tall && !DECOS[o.type].canopy && inView(o, 40, v)) drawDeco(o, time, dk);
   for (const p of poops) if (inView(p, 30, v)) drawPoop(p, time);
   for (const f of foods) if (inView(f, 30, v)) drawFoodItem(f);
   if (inView(bowl, bowl.r + 10, v)) drawBowl(time); // low to the ground: turtles always walk over it
@@ -2060,8 +2477,9 @@ function frame(now) {
     else if (o.kind === 'deco') drawDeco(o, time, dk);
     else {
       use(o);
-      const lift = slide ? slideLift(o, slide) : 0;
+      const lift = slide ? slideLift(o, slide) : 0, up2 = onLookout(o);
       if (lift) S = o.S * (1 + 0.28 * lift); // higher up the slide = closer to the camera
+      else if (up2) S = o.S * (1 + 0.18 * up2); // up on the lookout rock
       if (o.swim) { ctx.fillStyle = 'rgba(20,60,100,0.28)'; ctx.beginPath(); ctx.ellipse(o.x, o.y, o.S * 1.5, o.S * 1.3, o.a, 0, 7); ctx.fill(); }
       ctx.globalAlpha = clamp(o.releasing ?? 1, 0, 1) * (o.swim ? 0.88 : 1);
       drawTurtle(time);
@@ -2070,9 +2488,12 @@ function frame(now) {
     }
   }
   // tunnels, roofs and the lamp cover what's under them
-  const log = objOf('log'), hut = objOf('hut');
-  if (log && inView(log, LOG.len, v)) drawLog(log);
-  if (hut && inView(hut, HUT.r + 10, v)) drawHut(hut);
+  if (log) { const a = roofFade(log, dt); if (inView(log, LOG.len, v)) drawLog(log, 'roof', a); }
+  if (hut) { const a = roofFade(hut, dt); if (inView(hut, HUT.r + 10, v)) drawHut(hut, 'roof', a); }
+  if (cave) { const a = roofFade(cave, dt); if (inView(cave, CAVE.r * 1.2, v)) drawCave(cave, 'roof', a); }
+  if (fog && inView(fog, FOG_R + 40, v)) drawMist(fog, time, dk);
+  for (const o of trs) if (inView(o, treeLook(o).R + 40, v)) drawTree(o, time);
+  drawAirLife(v);
   if (lamp && inView(lamp, 40, v)) drawLamp(lamp, time);
   ctx.setLineDash([8 / cam.z, 6 / cam.z]); ctx.lineDashOffset = -time * 20; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5 / cam.z;
   if (placing) { ctx.beginPath(); ctx.arc(placing.x, placing.y, 70, 0, 7); ctx.stroke(); }

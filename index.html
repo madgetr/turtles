@@ -76,6 +76,14 @@
   #menu .dots span { color: #d9d0b4; }
   #menu button { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
   #menu button:disabled { opacity: .4; }
+  #namer { position: fixed; inset: 0; background: #0006; display: flex; align-items: center; justify-content: center; z-index: 10; }
+  #namer[hidden] { display: none; }
+  #namer .card { width: min(340px, 90vw); background: #fbf6e8; border-radius: 20px; padding: 16px; display: grid; gap: 10px; }
+  #namer .title { text-align: center; font-weight: 700; color: #2c3320; }
+  #namer input { font-size: 20px; padding: 10px 12px; border-radius: 12px; border: 2px solid #d9d0b4; background: #fff; color: #2c3320; text-align: center; outline: none; }
+  #namer input:focus { border-color: #8fd16a; }
+  #namer button { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
+  #namer button.ok { background: #8fd16a; }
   #menu button.ghost { background: transparent; color: #6b6a55; }
   #hint { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 146px); transform: translateX(-50%);
     background: #000a; color: #fff; padding: 6px 14px; border-radius: 14px; font-size: 14px; white-space: nowrap;
@@ -110,6 +118,11 @@
   <button id="m-vet" hidden>💊 Use vet kit</button>
   <button id="m-release">🌿 Release to the wild</button>
   <button id="m-close" class="ghost">Cancel</button>
+</div></div>
+<div id="namer" hidden><div class="card">
+  <div class="title"></div>
+  <input maxlength="14" autocomplete="off" enterkeyhint="done">
+  <button class="ok">OK</button>
 </div></div>
 <div id="away" hidden><div class="card"><h2>Welcome back! 🐢</h2><div class="body"></div><button id="away-ok">Check on them</button></div></div>
 <div id="tools">
