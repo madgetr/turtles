@@ -400,7 +400,7 @@ function load() {
 const AWAY_FLOOR = 25;
 const AWAY = { // tuned so a fed + watered turtle is hungry but fine after a day; ~2 days of neglect makes it sick
   hunger: 100 / (22 * 3600), thirst: 100 / (16 * 3600), happy: 100 / (30 * 3600), dirty: 100 / (72 * 3600),
-  hurt: 100 / (18 * 3600), filth: 100 / (36 * 3600), heal: 100 / (4 * 3600),
+  hurt: 100 / (18 * 3600), filth: 100 / (36 * 3600), heal: 100 / (8 * 3600), // full recovery takes ~8 h away
 };
 function healthStep(t, dt, r) {
   const s = t.st;
@@ -892,6 +892,10 @@ function craving(t) { // ate the same thing 4 times running: now wants the other
 }
 function moods(t) {
   const s = t.st, m = [], c = craving(t);
+  if (s.health < SICK) m.push(s.health < 25 ? '🤒 Very sick!' : '🤒 Sick'); // the real problems first
+  if (s.hunger < 30) m.push('🥬 Hungry');
+  if (s.thirst < 30) m.push('💧 Thirsty');
+  if (s.happy < 30) m.push('😢 Sad');
   if (s.social < MOOD.lonely) m.push('🤗 Lonely');
   if (s.energy < MOOD.tired) m.push('💤 Sleepy');
   if (s.warm < MOOD.cold) m.push('🥶 Chilly');
@@ -939,6 +943,7 @@ function updateStats(dt) {
   if (T.chub > 0.75) drain += 0.02;
   st.happy = clamp(st.happy - dt * drain, 0, 100);
   healthStep(T, dt, graceT > 0 ? GRACE : LIVE);
+  if (isIdle()) st.health = Math.max(st.health, AWAY_FLOOR); // nobody's playing: like being away, sick at worst
   if (st.health < 25 && !T.warned && T.dying === undefined) {
     T.warned = true; say(`⚠️ ${T.name} is very sick! Food & water, quick!`); buzz([60, 80, 60]);
   }
@@ -949,10 +954,22 @@ function updateStats(dt) {
   S = T.S = lerp(S, sizeFor(G()), Math.min(1, dt * 2)); // ease size changes
 }
 // Health change per second while you're watching. Neglect here can be fatal; while away it can't.
-const LIVE = { hurt: 0.3, filth: 0.06, heal: 0.25 };
-const GRACE = { hurt: 0, filth: 0, heal: 0.25 }; // first few minutes after opening: time to feed everyone
+const HEAL = 0.04; // ~40 min from very sick to full health (a vet kit is instant)
+const LIVE = { hurt: 0.3, filth: 0.06, heal: HEAL };
+const GRACE = { hurt: 0, filth: 0, heal: HEAL }; // first few minutes after opening: time to feed everyone
 const GRACE_SECS = 180;
 let graceT = GRACE_SECS;
+// Idle safeguard: a screen left on with nobody touching it counts as away, so turtles can't die.
+// The first touch back starts the same grace period as opening the game.
+const IDLE_MS = 5 * 60e3;
+let lastTouch = performance.now();
+const isIdle = () => performance.now() - lastTouch > IDLE_MS;
+function touched() {
+  if (isIdle()) { graceT = GRACE_SECS; if (turtles.some(t => t.st.health < SICK)) setTimeout(() => say('Welcome back! Someone needs care 🤒 Food & water, quick!', 3500), 300); }
+  lastTouch = performance.now();
+}
+addEventListener('pointerdown', touched, true);
+addEventListener('keydown', touched, true);
 function die(t) {
   t.dying = true; t.releasing = 2.5; t.v = 0; // reuses the release fade-out
   emit(t.x, t.y - t.S, 'sparkle', 10);
