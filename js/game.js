@@ -435,7 +435,9 @@ function rescaleToStandard() {
   base = { ...STD_BASE };
   setYardState(yards[yardIdx]);
 }
+let loadingBackup = false;
 function save() {
+  if (loadingBackup) return; // a backup is being loaded: don't write the old game over it
   yards[yardIdx] = packYard();
   localStorage.setItem(SAVE3, JSON.stringify({
     v: 3, yards, active: yardIdx, base, t: Date.now(),
@@ -2377,7 +2379,7 @@ function openYards(moving = null) {
     if (moving && i === yardIdx) return '';
     return `<button class="yd ${i === yardIdx ? 'here' : ''}" data-i="${i}" ${moving && full ? 'disabled' : ''}><b>${esc(s.name)}</b><span class="st">${moving && full ? 'Full' : s.st}</span><small>${s.info}</small></button>`;
   }).join('');
-  yardsEl.querySelector('.acts').innerHTML = moving ? '' : `<button class="rename">✏️ Rename ${esc(yardName)}</button>`
+  yardsEl.querySelector('.acts').innerHTML = moving ? '' : `<button class="rename">✏️ Rename ${esc(yardName)}</button><button class="backup">💾 Save &amp; load game</button>`
     + (yards.length < MAX_YARDS ? `<button class="buy" ${stars < yardCost() ? 'disabled' : ''}>🏞️ Build another yard · ⭐ ${yardCost()}</button>` : '');
   yardsEl.hidden = false;
 }
@@ -2391,6 +2393,7 @@ yardsEl.querySelector('.list').addEventListener('click', e => {
 yardsEl.querySelector('.acts').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || b.disabled) return;
   yardsEl.hidden = true;
+  if (b.classList.contains('backup')) return openBackup();
   if (b.classList.contains('rename')) return askName('Rename this yard', yardName, n => { yardName = n; save(); renderPills(); }, 24);
   if (b.classList.contains('buy') && stars >= yardCost()) { stars -= yardCost(); snd.play('buy'); buildYard(); }
 });
@@ -2425,6 +2428,83 @@ function swipeEnd(dx, ms) {
     snd.play('click');
   }, 170);
 }
+
+// ---------- save & load: the whole game as a compressed text code (or a file) ----------
+// Code = "TURTLEYARD1:" + base64(gzip(save JSON)). Plain JSON (e.g. a downloaded file) is accepted too.
+const CODE_TAG = 'TURTLEYARD1:';
+const backupEl = document.getElementById('backup');
+async function gzipB64(text) {
+  const cs = new CompressionStream('gzip'), w = cs.writable.getWriter();
+  w.write(new TextEncoder().encode(text)); w.close();
+  const bytes = new Uint8Array(await new Response(cs.readable).arrayBuffer());
+  let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+async function gunzipB64(b64) {
+  const bin = atob(b64.replace(/\s+/g, '')), bytes = Uint8Array.from(bin, ch => ch.charCodeAt(0));
+  const ds = new DecompressionStream('gzip'), w = ds.writable.getWriter();
+  w.write(bytes); w.close();
+  return new Response(ds.readable).text();
+}
+async function makeSaveCode() { save(); return CODE_TAG + await gzipB64(localStorage.getItem(SAVE3)); }
+async function readSave(text) { // returns the parsed save, or throws a friendly message
+  text = (text || '').trim();
+  if (!text) throw new Error('Paste a save code first');
+  let json = text;
+  if (text.startsWith(CODE_TAG)) { try { json = await gunzipB64(text.slice(CODE_TAG.length)); } catch { throw new Error('That save code looks broken or cut off. Copy the whole thing.'); } }
+  let d; try { d = JSON.parse(json); } catch { throw new Error("That doesn't look like a Turtle Yard save"); }
+  if (d?.yards?.length && d.yards.some(y => y?.turtles?.length)) return { key: SAVE3, d };
+  if (d?.turtles?.length) return { key: SAVE, d }; // an older single-yard save
+  throw new Error("That doesn't look like a Turtle Yard save");
+}
+function describeSave({ d }) {
+  const ys = d.yards || [d], n = ys.reduce((a, y) => a + (y?.turtles?.length || 0), 0), stars = d.shared?.stars ?? d.stars ?? 0;
+  return `${ys.length} yard${ys.length > 1 ? 's' : ''} (${ys.map(y => y?.name || 'My Yard').join(', ')}), ${n} turtle${n === 1 ? '' : 's'} and ${stars} ⭐`;
+}
+function loadSave(parsed) {
+  askConfirm('Load this backup?', `It has ${describeSave(parsed)}. Everything currently on this device will be replaced.`, '⬆️ Load', () => {
+    loadingBackup = true;
+    if (parsed.key === SAVE3) localStorage.setItem(SAVE3, JSON.stringify(parsed.d));
+    else { localStorage.removeItem(SAVE3); localStorage.setItem(SAVE, JSON.stringify(parsed.d)); } // old format: upgraded on load
+    say('Loading your backup… 🐢', 2000);
+    setTimeout(() => location.reload(), 400);
+  });
+}
+async function openBackup() {
+  backupEl.querySelector('.in').value = '';
+  backupEl.querySelector('.out').value = 'Making your save code…';
+  backupEl.hidden = false;
+  try { backupEl.querySelector('.out').value = await makeSaveCode(); }
+  catch { backupEl.querySelector('.out').value = 'Sorry, this device could not make a save code.'; }
+}
+backupEl.querySelector('.copy').onclick = async () => {
+  const ta = backupEl.querySelector('.out'), code = ta.value;
+  if (!code.startsWith(CODE_TAG)) return;
+  try { await navigator.clipboard.writeText(code); say('📋 Save code copied! Paste it somewhere safe', 3000); }
+  catch { ta.focus(); ta.select(); document.execCommand?.('copy'); say('Save code selected: copy it, then paste it somewhere safe', 3500); }
+  snd.play('job');
+};
+backupEl.querySelector('.dl').onclick = () => {
+  const code = backupEl.querySelector('.out').value;
+  if (!code.startsWith(CODE_TAG)) return;
+  const a = document.createElement('a'), d = new Date();
+  a.href = URL.createObjectURL(new Blob([code], { type: 'text/plain' }));
+  a.download = `turtle-yard-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.txt`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  say('💾 Backup file saved to your downloads (in the phone app, use Copy save code instead)', 3500);
+};
+backupEl.querySelector('.load').onclick = async () => {
+  try { loadSave(await readSave(backupEl.querySelector('.in').value)); } catch (e) { say('⚠️ ' + e.message, 3500); }
+};
+backupEl.querySelector('.file').onclick = () => backupEl.querySelector('.pick').click();
+backupEl.querySelector('.pick').onchange = async e => {
+  const f = e.target.files?.[0]; e.target.value = '';
+  if (!f) return;
+  try { loadSave(await readSave(await f.text())); } catch (err) { say('⚠️ ' + err.message, 3500); }
+};
+backupEl.querySelector('.close').onclick = () => { backupEl.hidden = true; };
+backupEl.addEventListener('click', e => { if (e.target === backupEl) backupEl.hidden = true; });
 
 // ---------- book + jobs sheets ----------
 const bookEl = document.getElementById('book'), jobsEl = document.getElementById('jobs');
