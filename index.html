@@ -69,6 +69,7 @@
   #menu[hidden] { display: none; }
   #menu .card { width: min(380px, 94vw); margin-bottom: calc(env(safe-area-inset-bottom) + 16px); background: #fbf6e8; border-radius: 20px; padding: 14px; display: grid; gap: 8px; }
   #menu .title { text-align: center; font-weight: 700; color: #2c3320; padding: 2px 0 4px; }
+  #menu .age { text-align: center; color: #6b6a55; font-size: 13px; margin-top: -6px; }
   #menu .persona { text-align: center; color: #6b6a55; font-size: 13px; font-style: italic; margin-top: -8px; }
   #menu .mood { text-align: center; color: #2c3320; font-size: 14px; margin-top: -2px; }
   #menu .traits { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; padding: 4px 18px 8px; font-size: 14px; color: #2c3320; }
@@ -124,6 +125,7 @@
 <div id="menu" hidden><div class="card">
   <div class="title"></div>
   <div class="persona"></div>
+  <div class="age"></div>
   <div class="mood"></div>
   <div class="traits"></div>
   <button id="m-rename">✏️ Rename</button>

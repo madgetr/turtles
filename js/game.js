@@ -124,7 +124,19 @@ const MIN_S = 15, MAX_S = 44;
 const STAGES = [[0, 'Hatchling'], [0.15, 'Baby'], [0.4, 'Juvenile'], [0.7, 'Young adult'], [1, 'Adult']];
 const stageOf = g => STAGES.filter(([t]) => g >= t).pop()[1];
 const aStage = name => (/^[AEIOU]/.test(name) ? 'an ' : 'a ') + name;
-const GROW_RATE = 1; // growth per bite multiplier (10 = fast, for testing)
+const GROW_RATE = 1; // growth multiplier (10 = fast, for testing)
+// Hatchling to adult takes about a month of real time with good care (fed, watered, healthy), open or not.
+// ~85% of it comes from time; snacks add a small boost on top.
+// "3 hours old", "12 days old", "2 months old"
+function ageText(t) {
+  const h = (Date.now() - t.born) / 3600e3, d = h / 24;
+  if (h < 1) return 'Just hatched';
+  if (h < 24) return `${Math.floor(h)} hour${h < 2 ? '' : 's'} old`;
+  if (d < 60) return `${Math.floor(d)} day${d < 2 ? '' : 's'} old`;
+  const mo = d / 30.4;
+  return mo < 24 ? `${Math.floor(mo)} months old` : `${Math.floor(mo / 12)} years old`;
+}
+const GROW_DAYS = 30, GROW_PER_SEC = 0.85 / (GROW_DAYS * 86400), GROW_PER_BITE = 0.00015;
 const sizeFor = g => lerp(MIN_S, MAX_S, Math.sqrt(clamp(g, 0, 1))); // grows fast early, slows later
 
 // ---------- turtles ----------
@@ -193,6 +205,7 @@ function makeTurtle(o = {}) {
     ...o,
   };
   if (!t.name) t.name = randomName();
+  if (!t.born) t.born = Date.now() - (t.growth || 0) * GROW_DAYS * 86400e3; // hatch time; older saves: guessed from how grown it is
   if (!t.tint) t.tint = o.hue ? { shell: clamp(o.hue * 0.5, -28, 28), skin: clamp(o.hue * 0.3, -18, 18), light: rand(-0.12, 0.12) } : randomTint();
   t.st = { hunger: 80, thirst: 80, happy: 70, health: 100, social: 80, energy: 85, warm: 90, ...(o.st || {}) }; // last three are hidden moods
   t.chub = o.chub || 0; t.diet = o.diet || []; // chub: 0 = trim, 1 = very round; diet = last few foods eaten
@@ -343,7 +356,7 @@ function drawYard(v) {
 
 // ---------- persistence ----------
 const SAVE = 'turtle-save-v2', OLD_SAVE = 'turtle-save-v1';
-const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud', 'chub', 'diet'];
+const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud', 'chub', 'diet', 'born'];
 function save() {
   localStorage.setItem(SAVE, JSON.stringify({
     turtles: turtles.filter(t => t.releasing === undefined).map(t => Object.fromEntries(KEEP.map(k => [k, t[k]]))),
@@ -380,7 +393,7 @@ function load() {
 const AWAY_FLOOR = 25;
 const AWAY = { // tuned so a fed + watered turtle is hungry but fine after a day; ~2 days of neglect makes it sick
   hunger: 100 / (22 * 3600), thirst: 100 / (16 * 3600), happy: 100 / (30 * 3600), dirty: 100 / (72 * 3600),
-  hurt: 100 / (18 * 3600), filth: 100 / (36 * 3600), heal: 100 / (4 * 3600), grow: 0.000002,
+  hurt: 100 / (18 * 3600), filth: 100 / (36 * 3600), heal: 100 / (4 * 3600),
 };
 function healthStep(t, dt, r) {
   const s = t.st;
@@ -427,7 +440,7 @@ function simulateAway(secs) {
         s.hunger = clamp(s.hunger + f.bites * 12, 0, 100); r.ate++;
         t.diet.push(f.type); if (t.diet.length > 6) t.diet.shift();
         if (f.type === 'berry') t.chub = clamp(t.chub + 0.05, 0, 1);
-        t.growth = clamp(t.growth + f.bites * 0.003 * GROW_RATE * 0.8, 0, 1);
+        t.growth = clamp(t.growth + f.bites * GROW_PER_BITE * GROW_RATE * 0.8, 0, 1);
         t.gut.push(rand(15, 28) * 40); // digests over ~10-20 min while away
       }
       for (let g = t.gut.length - 1; g >= 0; g--) {
@@ -446,7 +459,7 @@ function simulateAway(secs) {
       t.chub = clamp(t.chub - dt * 0.000015, 0, 1); // slims down slowly: a berry binge still shows the next morning
       healthStep(t, dt, AWAY);
       s.health = Math.max(s.health, AWAY_FLOOR); // never dies while you're away: at worst comes back sick
-      if (s.health > 50 && s.hunger > 40 && s.thirst > 40) t.growth = clamp(t.growth + dt * AWAY.grow * (lamp ? 1.3 : 1), 0, 1);
+      if (s.health > 50 && s.hunger > 40 && s.thirst > 40) t.growth = clamp(t.growth + dt * GROW_PER_SEC * GROW_RATE * (lamp ? 1.15 : 1), 0, 1);
       if (s.hunger <= 0) r.starved = true;
       if (s.thirst <= 0) r.parched = true;
       r.lowHealth = Math.min(r.lowHealth, s.health);
@@ -656,7 +669,7 @@ function think(dt) {
       st.happy = clamp(st.happy + (want === f.type ? 10 : want ? -1 : f.type === 'berry' ? 5 : 2), 0, 100); // bored of the same old food
       if (want === f.type && f.bites === 1) emit(T.x, T.y - S, 'heart', 2);
       emit(f.x, f.y, 'crumb', 6); buzz(5);
-      grow((f.type === 'berry' ? 0.004 : 0.003) * (0.5 + st.happy / 100));
+      grow(GROW_PER_BITE * (f.type === 'berry' ? 1.3 : 1) * (0.5 + st.happy / 100));
       if (f.bites <= 0) {
         T.diet.push(f.type); if (T.diet.length > 6) T.diet.shift();
         if (f.type === 'berry') T.chub = clamp(T.chub + 0.05, 0, 1);
@@ -923,7 +936,7 @@ function updateStats(dt) {
   if (st.health > 40) T.warned = false;
   if (st.health <= 0 && T.dying === undefined) { if (up.vet > 0) useVet(T, true); else die(T); }
   // healthy, happy turtles slowly grow on their own
-  if (st.hunger > 50 && st.thirst > 50 && st.happy > 50 && st.health > 50 && poops.length < 3) grow(dt * 0.000012 * (warm ? 2 : 1));
+  if (st.hunger > 50 && st.thirst > 50 && st.happy > 50 && st.health > 50 && poops.length < 3) grow(dt * GROW_PER_SEC * (warm ? 1.15 : 1));
   S = T.S = lerp(S, sizeFor(G()), Math.min(1, dt * 2)); // ease size changes
 }
 // Health change per second while you're watching. Neglect here can be fatal; while away it can't.
@@ -2255,6 +2268,7 @@ stageEl.addEventListener('click', () => {
   if (!isPicked()) return openRoster();
   menu.querySelector('.title').textContent = `🐢 ${sel.name}`;
   menu.querySelector('.persona').textContent = personality(sel.traits);
+  menu.querySelector('.age').textContent = `🎂 ${ageText(sel)}`;
   menu.querySelector('.mood').textContent = moods(sel);
   menu.querySelector('.traits').innerHTML = TRAITS.map(d => {
     const n = dots(sel.traits[d.k]);
@@ -2292,7 +2306,7 @@ function openRoster() {
     const col = well < 30 ? '#ef6a5a' : well < 55 ? '#f2c14e' : '#8fd16a';
     const stage = t.growth >= 1 ? 'Adult' : stageOf(t.growth);
     return `<button class="who" data-i="${turtles.indexOf(t)}"><b>${esc(t.name)}</b><span class="chips">${statusIcons(t)}</span>`
-      + `<small>${stage} · ${personality(t.traits)}</small><span class="well"><i style="width:${well.toFixed(0)}%;background:${col}"></i></span></button>`;
+      + `<small>${stage} · ${ageText(t)} · ${personality(t.traits)}</small><span class="well"><i style="width:${well.toFixed(0)}%;background:${col}"></i></span></button>`;
   }).join('');
   roster.hidden = false;
 }
