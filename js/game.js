@@ -1505,7 +1505,7 @@ document.querySelectorAll('#tools button').forEach(b => b.addEventListener('clic
   mode = b.dataset.mode;
   placing = null; endArrange();
   document.querySelectorAll('#tools button').forEach(x => x.classList.toggle('on', x === b));
-  say({ walk: turtles.length > 1 ? (isPicked() ? `Tap to call ${sel.name} · tap a turtle to pet & pick it` : 'Tap a turtle to pick it') : 'Tap to call your turtle · tap him to pet', food: 'Tap to drop food', clean: 'Tap the messes to scoop them', play: 'Tap to toss the ball · flick it' }[mode]);
+  say({ walk: turtles.length > 1 ? (isPicked() ? `Tap to call ${sel.name} · tap ${sel.name} again to deselect` : 'Tap a turtle to pick it') : 'Tap to call your turtle · tap him to pet', food: 'Tap to drop food', clean: 'Tap the messes to scoop them', play: 'Tap to toss the ball · flick it' }[mode]);
   if (mode === 'play' && !ball) ball = makeBall(cam.x, cam.y);
   renderToybar();
 }));
@@ -1647,7 +1647,9 @@ function tap(p) {
   if (arranging) return;
   if (p.x < 0 || p.y < 0 || p.x > YW || p.y > YH) { if (isPicked() && turtles.length > 1) deselect(); return; }
   const hitT = turtles.filter(t => t.releasing === undefined && dist(p, t) < t.S * 1.2 + 8 / cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0];
-  if (hitT) return mode === 'clean' && hitT.mud > 0 ? wash(hitT) : pet(hitT);
+  if (hitT && mode === 'clean' && hitT.mud > 0) return wash(hitT);
+  if (hitT && hitT === sel && picked && turtles.length > 1) return deselect(); // tap the picked turtle again to let go
+  if (hitT) return pet(hitT);
   if (mode === 'walk' && !isPicked()) say('Tap a turtle to pick it, then tap to call it');
   else if (mode === 'walk') { sel.userTarget = { x: p.x, y: p.y }; sel.eat = null; sel.drinkT = 0; sel.rest = null; sel.outing = null; }
   else if (mode === 'food') {
@@ -1727,14 +1729,12 @@ stageEl.addEventListener('click', () => {
     return `<div>${d.icon} ${d.label}</div><div class="dots">${'●'.repeat(n)}<span>${'●'.repeat(5 - n)}</span></div>`;
   }).join('');
   document.getElementById('m-release').disabled = turtles.length < 2;
-  document.getElementById('m-deselect').hidden = turtles.length < 2;
   const vb = document.getElementById('m-vet');
   vb.hidden = !up.vet; vb.textContent = `💊 Use vet kit (${up.vet} left)`;
   menu.hidden = false;
 });
 menu.addEventListener('click', e => { if (e.target === menu) menu.hidden = true; });
 document.getElementById('m-close').onclick = () => { menu.hidden = true; };
-document.getElementById('m-deselect').onclick = () => { menu.hidden = true; deselect(); };
 document.getElementById('m-rename').onclick = () => {
   menu.hidden = true;
   const name = (prompt(`Rename ${sel.name}:`, sel.name) ?? '').trim().slice(0, 14);
