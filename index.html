@@ -30,6 +30,10 @@
   #stars { position: fixed; left: 10px; top: calc(env(safe-area-inset-top) + 34px); border: 0; border-radius: 14px;
     padding: 4px 10px; background: #0005; color: #ffd84a; font-size: 15px; font-weight: 800; backdrop-filter: blur(6px); }
   #stars.bump { animation: bump .4s; }
+  #swipehint { position: fixed; top: 50%; transform: translateY(-50%); z-index: 6; display: grid; gap: 4px; justify-items: center; padding: 10px 14px; border-radius: 16px; background: #000b; color: #fff; font-size: 15px; pointer-events: none; }
+  #swipehint.right { right: 10px; } #swipehint.left { left: 10px; }
+  #swipehint span { font-size: 11px; letter-spacing: 3px; color: #ffd84a; }
+  #swipehint[hidden] { display: none; }
   #pills { position: fixed; left: 10px; top: calc(env(safe-area-inset-top) + 66px); display: flex; gap: 6px; }
   #pills button { border: 0; border-radius: 12px; padding: 3px 9px; background: #0005; color: #fff; font-size: 13px; font-weight: 700; backdrop-filter: blur(6px); }
   #pills button:active { transform: scale(.94); }
@@ -188,6 +192,7 @@
 <div id="paintbar" hidden><div class="sw"></div><div class="row"><span class="info"></span><button class="unlock" hidden></button><button class="brush">Brush</button><button class="done">✓ Done</button></div></div>
 <button id="arrange-done" hidden>✓ Done arranging</button>
 <div id="hint"></div>
+<div id="swipehint" hidden></div>
 <div id="shop" hidden><div class="card">
   <div class="head"><b>Shop</b><span id="shop-stars"></span><button id="shop-close">✕</button></div>
   <div id="shop-list"></div>

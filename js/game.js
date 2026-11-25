@@ -2398,6 +2398,34 @@ yardsEl.querySelector('.close').onclick = () => { yardsEl.hidden = true; movingT
 yardsEl.addEventListener('click', e => { if (e.target === yardsEl) { yardsEl.hidden = true; movingTurtle = null; } });
 yardsBtn.onclick = () => openYards();
 
+// ---------- swipe between yards (only when fully zoomed out, so it never fights with panning) ----------
+const swipeEl = document.getElementById('swipehint');
+const atMinZoom = () => cam.z <= zMin() * 1.01;
+const nextYard = dir => (yardIdx + (dir < 0 ? 1 : yards.length - 1)) % yards.length; // finger moving left = next yard
+function swipeShow(dx) {
+  const n = yards.length;
+  cv.style.transition = 'none';
+  cv.style.transform = `translateX(${n > 1 ? dx : dx * 0.25}px)`; // one yard: a little stretchy bounce
+  if (n < 2) { swipeEl.hidden = true; return; }
+  const j = nextYard(dx), name = esc(yards[j]?.name || 'Yard');
+  swipeEl.innerHTML = `<b>${dx < 0 ? `${name} →` : `← ${name}`}</b><span>${yards.map((_, i) => (i === yardIdx ? '●' : '○')).join(' ')}</span>`;
+  swipeEl.className = dx < 0 ? 'right' : 'left'; swipeEl.hidden = false;
+}
+function swipeCancel() { swipeEl.hidden = true; cv.style.transition = 'transform .2s ease-out'; cv.style.transform = 'translateX(0)'; }
+function swipeEnd(dx, ms) {
+  const n = yards.length, go = n > 1 && (Math.abs(dx) > W * 0.33 || (Math.abs(dx) > 50 && Math.abs(dx) / Math.max(1, ms) > 0.6));
+  if (!go) { if (n < 2 && Math.abs(dx) > 40) say('Build another yard and you can swipe between them 🏞️', 2500); return swipeCancel(); }
+  swipeEl.hidden = true;
+  const dir = dx < 0 ? -1 : 1, j = nextYard(dx);
+  cv.style.transition = 'transform .16s ease-in'; cv.style.transform = `translateX(${dir * W}px)`; // slide this yard away
+  setTimeout(() => {
+    switchYard(j);
+    cv.style.transition = 'none'; cv.style.transform = `translateX(${-dir * W}px)`; // the next yard comes in from the other side
+    requestAnimationFrame(() => requestAnimationFrame(() => { cv.style.transition = 'transform .22s ease-out'; cv.style.transform = 'translateX(0)'; }));
+    snd.play('click');
+  }, 170);
+}
+
 // ---------- book + jobs sheets ----------
 const bookEl = document.getElementById('book'), jobsEl = document.getElementById('jobs');
 const bookBtn = document.getElementById('book-btn'), jobsBtn = document.getElementById('jobs-btn');
@@ -2893,6 +2921,7 @@ cv.addEventListener('pointerdown', e => {
   try { cv.setPointerCapture(e.pointerId); } catch { }
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (ptrs.size === 2) { // pinch to zoom (and pan with two fingers)
+    if (gest?.kind === 'yardswipe') swipeCancel();
     if (drag) endDrag();
     const [a, b] = [...ptrs.values()], mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     gest = { kind: 'pinch', d0: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), z0: cam.z, w0: s2w(mid.x, mid.y) };
@@ -2934,8 +2963,13 @@ cv.addEventListener('pointermove', e => {
     cam.z = clamp(gest.z0 * Math.hypot(a.x - b.x, a.y - b.y) / gest.d0, zMin(), zMax());
     cam.x = gest.w0.x - (mid.x - vcx()) / cam.z; cam.y = gest.w0.y - (mid.y - vcy()) / cam.z;
     clampCam();
+  } else if (gest.kind === 'yardswipe') {
+    swipeShow(e.clientX - gest.sx);
   } else if (gest.kind === 'maybe' || gest.kind === 'pan') {
     const dx = e.clientX - gest.sx, dy = e.clientY - gest.sy;
+    if (gest.kind === 'maybe' && atMinZoom() && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.3) { // fully zoomed out: a sideways swipe changes yard
+      gest.kind = 'yardswipe'; gest.t0 = performance.now(); swipeShow(dx); return;
+    }
     if (gest.kind === 'maybe' && Math.hypot(dx, dy) > 10) gest.kind = 'pan';
     if (gest.kind === 'pan') { cam.x = gest.cx - dx / cam.z; cam.y = gest.cy - dy / cam.z; clampCam(); }
   }
@@ -2957,6 +2991,7 @@ function pointerEnd(e) {
       pk ? `This yard will lose its power ${POWERS[pk].icon} ${POWERS[pk].name}. You can place it again any time from the 📖 book.` : "You won't get the stars back.",
       'Remove', () => { objs = objs.filter(x => x !== o); emit(o.x, o.y, 'sparkle', 6); save(); });
   }
+  else if (gest?.kind === 'yardswipe') { if (e.type === 'pointerup') swipeEnd(e.clientX - gest.sx, performance.now() - gest.t0); else swipeCancel(); }
   else if (gest?.kind === 'maybe' && e.type === 'pointerup') tap(s2w(e.clientX, e.clientY));
   if (gest?.kind === 'pinch' && ptrs.size) gest = { kind: 'done' }; // the finger left behind doesn't tap
   if (!ptrs.size) gest = null;
