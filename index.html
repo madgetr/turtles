@@ -76,6 +76,18 @@
   #menu .dots span { color: #d9d0b4; }
   #menu button { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
   #menu button:disabled { opacity: .4; }
+  #roster { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-end; justify-content: center; z-index: 9; }
+  #roster[hidden] { display: none; }
+  #roster .card { width: min(400px, 94vw); max-height: 75vh; margin-bottom: calc(env(safe-area-inset-bottom) + 16px); background: #fbf6e8; border-radius: 20px; padding: 14px; display: grid; grid-template-rows: auto 1fr auto; gap: 8px; }
+  #roster .title { text-align: center; font-weight: 700; color: #2c3320; }
+  #roster .list { overflow-y: auto; display: grid; gap: 6px; align-content: start; }
+  #roster .who { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto auto; column-gap: 10px; text-align: left; border: 0; border-radius: 14px; padding: 9px 12px; background: #f1ead3; color: #2c3320; font: inherit; }
+  #roster .who b { font-size: 16px; }
+  #roster .who small { grid-column: 1; color: #6b6a55; font-size: 12px; }
+  #roster .who .chips { grid-column: 2; grid-row: 1 / 3; align-self: center; font-size: 20px; letter-spacing: 2px; }
+  #roster .who .well { grid-column: 1 / 3; height: 5px; border-radius: 3px; background: #e2d9bd; margin-top: 6px; overflow: hidden; }
+  #roster .who .well i { display: block; height: 100%; border-radius: 3px; }
+  #roster button.close { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
   #namer { position: fixed; inset: 0; background: #0006; display: flex; align-items: center; justify-content: center; z-index: 10; }
   #namer[hidden] { display: none; }
   #namer .card { width: min(340px, 90vw); background: #fbf6e8; border-radius: 20px; padding: 16px; display: grid; gap: 10px; }
@@ -118,6 +130,11 @@
   <button id="m-vet" hidden>💊 Use vet kit</button>
   <button id="m-release">🌿 Release to the wild</button>
   <button id="m-close" class="ghost">Cancel</button>
+</div></div>
+<div id="roster" hidden><div class="card">
+  <div class="title"></div>
+  <div class="list"></div>
+  <button class="close">Close</button>
 </div></div>
 <div id="namer" hidden><div class="card">
   <div class="title"></div>

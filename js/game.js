@@ -250,6 +250,21 @@ const viewH = () => H - TOP - BOTTOM;
 const vcx = () => W / 2, vcy = () => TOP + viewH() / 2; // screen point the camera centers on
 const zMin = () => Math.min(1, W / YW, viewH() / YH);   // zoomed all the way out = whole yard fits
 const Z_MAX = 2.5;
+// Opening a turtle's stats glides the camera over and zooms in, framing it in the space above the card.
+// It keeps following while the card is open; closing the card leaves the view where it is.
+let camFollow = null;
+function focusTurtle(t, glide) { camFollow = { t, z: clamp(55 / t.S, 1.3, Z_MAX), until: glide ? performance.now() + 1500 : 0 }; }
+function followCam(dt) {
+  if (!camFollow) return;
+  if (!turtles.includes(camFollow.t) || (camFollow.until ? performance.now() > camFollow.until : menu.hidden)) { camFollow = null; return; }
+  const card = menu.hidden ? null : menu.querySelector('.card').getBoundingClientRect();
+  const sy = card ? TOP + Math.max(40, (card.top - TOP) / 2) : vcy(); // middle of the space above the card, or the view
+  const k = Math.min(1, dt * 4), t = camFollow.t;
+  cam.z = lerp(cam.z, clamp(camFollow.z, zMin(), Z_MAX), k);
+  cam.x = lerp(cam.x, t.x, k);
+  cam.y = lerp(cam.y, t.y - (sy - vcy()) / cam.z, k);
+  clampCam();
+}
 function clampCam() {
   cam.z = clamp(cam.z, zMin(), Z_MAX);
   const hw = W / 2 / cam.z, hh = viewH() / 2 / cam.z;
@@ -2038,6 +2053,7 @@ let drag = null; // ball being flicked
 const ptrs = new Map();
 let gest = null;
 cv.addEventListener('pointerdown', e => {
+  if (camFollow?.until) camFollow = null; // touching the yard takes the camera back
   if (!ptrs.size && (e.clientY < TOP - 20 || e.clientY > H - BOTTOM + 10)) return;
   try { cv.setPointerCapture(e.pointerId); } catch { }
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -2236,7 +2252,7 @@ document.getElementById('away-ok').onclick = () => { document.getElementById('aw
 // ---------- tap the name label: rename or release ----------
 const menu = document.getElementById('menu');
 stageEl.addEventListener('click', () => {
-  if (!isPicked()) return say('Tap a turtle to pick it');
+  if (!isPicked()) return openRoster();
   menu.querySelector('.title').textContent = `🐢 ${sel.name}`;
   menu.querySelector('.persona').textContent = personality(sel.traits);
   menu.querySelector('.mood').textContent = moods(sel);
@@ -2248,8 +2264,46 @@ stageEl.addEventListener('click', () => {
   const vb = document.getElementById('m-vet');
   vb.hidden = !up.vet; vb.textContent = `💊 Use vet kit (${up.vet} left)`;
   menu.hidden = false;
+  focusTurtle(sel);
 });
 menu.addEventListener('click', e => { if (e.target === menu) menu.hidden = true; });
+
+// ---------- nobody picked: tap "N turtles" for a list of everyone ----------
+const roster = document.getElementById('roster');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function statusIcons(t) {
+  const s = t.st, c = [], crave = craving(t);
+  if (s.health < SICK) c.push('🤒');
+  if (s.hunger < 30) c.push('🥬');
+  if (s.thirst < 30) c.push('💧');
+  if (s.happy < 30) c.push('😢');
+  if (s.social < MOOD.lonely) c.push('🤗');
+  if (s.warm < MOOD.cold) c.push('🥶');
+  if (s.energy < MOOD.tired && t.rest?.kind !== 'sleep') c.push('💤');
+  if (crave && s.hunger < 85) c.push(crave === 'berry' ? '🍓' : '🥗');
+  if (t.rest?.kind === 'sleep') c.push('😴');
+  return c.length ? c.slice(0, 4).join('') : '😊';
+}
+function openRoster() {
+  const live = turtles.filter(t => t.releasing === undefined);
+  roster.querySelector('.title').textContent = `🐢 Your turtles (${live.length})`;
+  roster.querySelector('.list').innerHTML = live.map(t => {
+    const s = t.st, well = (s.health + s.hunger + s.thirst + s.happy) / 4;
+    const col = well < 30 ? '#ef6a5a' : well < 55 ? '#f2c14e' : '#8fd16a';
+    const stage = t.growth >= 1 ? 'Adult' : stageOf(t.growth);
+    return `<button class="who" data-i="${turtles.indexOf(t)}"><b>${esc(t.name)}</b><span class="chips">${statusIcons(t)}</span>`
+      + `<small>${stage} · ${personality(t.traits)}</small><span class="well"><i style="width:${well.toFixed(0)}%;background:${col}"></i></span></button>`;
+  }).join('');
+  roster.hidden = false;
+}
+roster.querySelector('.list').addEventListener('click', e => {
+  const t = turtles[+e.target.closest('.who')?.dataset.i];
+  if (!t) return;
+  roster.hidden = true;
+  select(t); focusTurtle(t, true);
+});
+roster.querySelector('.close').onclick = () => { roster.hidden = true; };
+roster.addEventListener('click', e => { if (e.target === roster) roster.hidden = true; });
 document.getElementById('m-close').onclick = () => { menu.hidden = true; };
 document.getElementById('m-rename').onclick = () => {
   menu.hidden = true;
@@ -2400,6 +2454,7 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   const time = now / 1000;
   graceT -= dt; waterStarCool -= dt;
+  followCam(dt);
   const v = viewRect();
   for (const t of turtles) {
     use(t);
