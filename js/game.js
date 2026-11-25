@@ -1292,6 +1292,18 @@ function drawTurtle(time) {
   c.save(); c.translate(T.x, T.y); c.rotate(T.a); c.scale(1, wide);
   const sg = c.createRadialGradient(-S * 0.2, -S * 0.25, S * 0.1, 0, 0, S * 1.1);
   sg.addColorStop(0, L.shellHi); sg.addColorStop(0.7, L.shellMid); sg.addColorStop(1, L.shellLo);
+  if ((T.morph || {}).spikes) { // triangle spikes poking out all round the rim (gaps for head and tail)
+    const n = 18, len = Math.max(S * 0.3, 6), half = Math.PI / n * 0.7; // a minimum length so hatchlings' spikes still show
+    for (let i = 0; i < n; i++) {
+      const a = (i + 0.5) / n * Math.PI * 2;
+      if (Math.abs(angDiff(a, 0)) < 0.5 || Math.abs(angDiff(a, Math.PI)) < 0.4) continue;
+      const pt = (ang, k) => [Math.cos(ang) * (S * k), Math.sin(ang) * (S * ar * k)];
+      const [bx1, by1] = pt(a - half, 0.92), [bx2, by2] = pt(a + half, 0.92), [tx, ty] = pt(a, 1 + len / S);
+      c.fillStyle = L.rim; c.beginPath(); c.moveTo(bx1, by1); c.lineTo(tx, ty); c.lineTo(bx2, by2); c.closePath(); c.fill();
+      const [mx, my] = pt(a - half * 0.25, 0.95); // lighter face on one side so each spike looks 3D
+      c.fillStyle = L.spine; c.beginPath(); c.moveTo(bx1, by1); c.lineTo(tx, ty); c.lineTo(mx, my); c.closePath(); c.fill();
+    }
+  }
   c.fillStyle = L.rim; c.beginPath(); c.ellipse(0, 0, S + 2.5, S * ar + 2.5, 0, 0, 7); c.fill();
   c.fillStyle = sg; c.beginPath(); c.ellipse(0, 0, S, S * ar, 0, 0, 7); c.fill();
   c.strokeStyle = L.rim; c.lineWidth = Math.max(1, S * 0.04);
@@ -1316,12 +1328,6 @@ function drawTurtle(time) {
     c.strokeStyle = 'rgba(240,200,70,0.75)'; c.lineWidth = Math.max(1, S * 0.07); c.lineCap = 'round';
     for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; c.beginPath(); c.moveTo(Math.cos(a) * S * 0.25, Math.sin(a) * S * ar * 0.25); c.lineTo(Math.cos(a) * S, Math.sin(a) * S * ar); c.stroke(); }
     c.restore();
-  }
-  if (Mo.spikes) for (const [x, y, r] of scutes) { // a pointy knob on each scute
-    const kg = c.createRadialGradient(x - r * 0.12, y - r * 0.15, 0, x, y, r * 0.36);
-    kg.addColorStop(0, L.shellHi); kg.addColorStop(0.6, L.spine); kg.addColorStop(1, L.rim);
-    c.fillStyle = kg; c.beginPath(); c.arc(x, y, r * 0.36, 0, 7); c.fill();
-    c.fillStyle = '#ffffffaa'; c.beginPath(); c.arc(x - r * 0.1, y - r * 0.12, r * 0.09, 0, 7); c.fill();
   }
   if (Mo.color === 'gold') { // a shine that sweeps across the shell
     c.save(); c.beginPath(); c.ellipse(0, 0, S, S * ar, 0, 0, 7); c.clip();
