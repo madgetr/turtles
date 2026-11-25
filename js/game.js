@@ -626,13 +626,13 @@ function goalFor() {
   if (st.thirst < 65) {
     const pond = objOf('pond'), w = nearestWater(T);
     if (w && (bowl.level <= 0.08 || dist(T, w) < dist(T, bowl)) && (!pond || dist(T, w) < dist(T, pond) - POND.rx)) // painted water is closest
-      return { p: w, reach: TILE * 0.5 + 4, bodyReach: TILE * 0.5 + S * 0.9 + 6, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = 'water'; } }; // reaching the edge is enough
+      return { p: w, reach: TILE * 0.5 + 4, bodyReach: TILE * 0.5 + S * 0.9 + 6, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = 'water'; actStar(); } }; // reaching the edge is enough
     if (pond && (bowl.level <= 0.08 || dist(T, pond) - POND.rx < dist(T, bowl))) { // drink at the near edge of the pond
       const a = Math.atan2(T.y - pond.y, T.x - pond.x);
       const p = { x: pond.x + Math.cos(a) * POND.rx * 0.8, y: pond.y + Math.sin(a) * POND.ry * 0.8 };
-      return { p, reach: 12, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = pond; } };
+      return { p, reach: 12, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = pond; actStar(); } };
     }
-    if (bowl.level > 0.08) return { p: bowl, reach: bowl.r + 4, bodyReach: bowl.r + S * 0.9 + 6, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = bowl; } }; // bumping the rim is close enough
+    if (bowl.level > 0.08) return { p: bowl, reach: bowl.r + 4, bodyReach: bowl.r + S * 0.9 + 6, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = bowl; actStar(); } }; // bumping the rim is close enough
   }
   if (ball && st.hunger > 15 && st.thirst > 15 && (T.traits.playful > 0.3 || st.happy < 40)) { // lazy turtles only play when they're down
     return { p: ball, reach: 14 + ball.r, by: 'mouth', arrive: nudgeBall, keepGoing: true };
@@ -643,16 +643,17 @@ function goalFor() {
       o.route.shift();
       if (o.route.length) return;
       T.outing = null; T.idleT = rand(2, 6) * lerp(2.2, 0.5, T.traits.curious);
-      if (o.then === 'bask') T.rest = { kind: 'bask', t: rand(8, 16) * (o.on === 'lookout' ? 1.6 : 1), on: o.on };
-      if (o.then === 'mist') { st.happy = clamp(st.happy + 4, 0, 100); emit(T.x, T.y - S, 'heart'); }
-      if (o.then === 'hide') T.rest = { kind: 'hide', t: rand(10, 20) };
-      if (o.then === 'tunnel') { st.happy = clamp(st.happy + 3 + T.traits.curious * 6, 0, 100); emit(T.x, T.y - S, 'heart'); }
+      if (o.then === 'bask') { T.rest = { kind: 'bask', t: rand(8, 16) * (o.on === 'lookout' ? 1.6 : 1), on: o.on }; actStar(o.on === 'lookout' ? 2 : 1); }
+      if (o.then === 'mist') { st.happy = clamp(st.happy + 4, 0, 100); emit(T.x, T.y - S, 'heart'); actStar(); }
+      if (o.then === 'swim') actStar();
+      if (o.then === 'hide') { T.rest = { kind: 'hide', t: rand(10, 20) }; actStar(); }
+      if (o.then === 'tunnel') { st.happy = clamp(st.happy + 3 + T.traits.curious * 6, 0, 100); emit(T.x, T.y - S, 'heart'); actStar(2); }
       if (o.then === 'sleep') T.rest = { kind: 'sleep', t: rand(40, 120) };
-      if (o.then === 'roll') { T.rest = { kind: 'roll', t: rand(3, 5) }; T.mud = 1; st.happy = clamp(st.happy + 8, 0, 100); }
-      if (o.then === 'mirror') T.rest = { kind: 'mirror', t: rand(5, 9) };
+      if (o.then === 'roll') { T.rest = { kind: 'roll', t: rand(3, 5) }; T.mud = 1; st.happy = clamp(st.happy + 8, 0, 100); actStar(); }
+      if (o.then === 'mirror') { T.rest = { kind: 'mirror', t: rand(5, 9) }; actStar(); }
       if (o.then === 'greet') { // say hi to a friend
         const f = o.friend;
-        if (f && dist(f, T) < (f.S + S) * 1.8) { st.social = clamp(st.social + 12, 0, 100); f.st.social = clamp(f.st.social + 6, 0, 100); emit(T.x, T.y - S, 'heart', 2); T.a = Math.atan2(f.y - T.y, f.x - T.x); }
+        if (f && dist(f, T) < (f.S + S) * 1.8) { actStar(); st.social = clamp(st.social + 12, 0, 100); f.st.social = clamp(f.st.social + 6, 0, 100); emit(T.x, T.y - S, 'heart', 2); T.a = Math.atan2(f.y - T.y, f.x - T.x); }
       }
       if (o.then === 'slide') { const sl = objOf('slide'); if (sl) T.sliding = { t: 0, from: { x: T.x, y: sl.y }, to: { x: sl.x - SLIDE.len / 2 - 55, y: sl.y } }; }
     } };
@@ -735,8 +736,14 @@ function nudgeBall() {
   buzz(8);
 }
 
+// A star for something the current turtle did on its own (eating, drinking, basking, sliding...).
+// At most one every couple of seconds per turtle, so a big family earns a steady trickle, not a flood.
+function actStar(n = 1) {
+  if ((T.actCool || 0) > 0) return;
+  T.actCool = 2.2; earn(n, T.x, T.y - S * 2);
+}
 function think(dt) {
-  T.nudgeCool -= dt; T.petCool -= dt; T.starCool -= dt; T.playStarCool -= dt;
+  T.nudgeCool -= dt; T.petCool -= dt; T.starCool -= dt; T.playStarCool -= dt; T.actCool = (T.actCool || 0) - dt;
   if (T.sliding) { // whoosh down the slide
     const sl = T.sliding;
     sl.t = Math.min(1, sl.t + dt / 0.8);
@@ -745,7 +752,7 @@ function think(dt) {
     T.a = Math.atan2(sl.to.y - sl.from.y, sl.to.x - sl.from.x); T.v = 140; T.headExt = 1;
     T.tailT += dt * 8;
     if (sl.t >= 1) {
-      T.sliding = null; T.v = 30; T.chub = clamp(T.chub - 0.02, 0, 1); st.energy = clamp(st.energy - 1.5, 0, 100);
+      T.sliding = null; T.v = 30; actStar(2); T.chub = clamp(T.chub - 0.02, 0, 1); st.energy = clamp(st.energy - 1.5, 0, 100);
       st.happy = clamp(st.happy + 6 + T.traits.playful * 6, 0, 100); emit(T.x, T.y - S, 'heart', 2);
       if (inPond(T)) for (let i = 0; i < 12; i++) emit(T.x, T.y, 'drop');
     }
@@ -762,7 +769,7 @@ function think(dt) {
     T.lookAt = T.eat.f;
     T.headExt = 0.9 + Math.sin(T.eat.t * 14) * 0.15;
     if (T.eat.t > lerp(1.5, 0.75, T.traits.appetite)) { // big appetites chomp faster
-      if (T.eat.f.bites === 1) earn(1, T.eat.f.x, T.eat.f.y - 10);
+      earn(1, T.eat.f.x, T.eat.f.y - 10); // every bite
       const f = T.eat.f; f.bites--; T.eat.t = 0; sfx(f.type === 'berry' ? 'squish' : 'munch', f);
       const want = craving(T);
       if (st.hunger > 90) T.chub = clamp(T.chub + 0.02, 0, 1); // eating when already full
@@ -803,7 +810,7 @@ function think(dt) {
     }
     if (T.rest.t <= 0 || T.userTarget || (foods.length && st.hunger < 60) || st.thirst < 35 || (kind === 'sleep' && darkness() < 0.3 && st.energy > 90)) {
       if (kind === 'sleep' && T.rest.t <= 0 && st.energy < 60 && !T.userTarget && st.thirst >= 35 && !(foods.length && st.hunger < 60)) T.rest.t = rand(20, 40); // still sleepy: keep dozing
-      else T.rest = null;
+      else { if (kind === 'sleep' && T.rest.t <= 0) actStar(); T.rest = null; } // woke up from a good nap
     }
   } else {
     T.headExt = lerp(T.headExt, st.energy < MOOD.tired ? 0.7 : st.social < MOOD.lonely ? 0.8 : st.warm < MOOD.cold ? 0.6 : 1, dt * 4); // droopy when tired, lonely or cold
@@ -2484,16 +2491,32 @@ backupEl.querySelector('.copy').onclick = async () => {
   catch { ta.focus(); ta.select(); document.execCommand?.('copy'); say('Save code selected: copy it, then paste it somewhere safe', 3500); }
   snd.play('job');
 };
-backupEl.querySelector('.dl').onclick = () => {
+// In the phone app downloads are ignored, so the backup is written to a file and handed to Android's share sheet
+// (save to Files or Drive, email it, message it). On the web it's an ordinary download.
+const isNativeApp = !!window.Capacitor?.isNativePlatform?.();
+let nativeFS = null, nativeShare = null;
+backupEl.querySelector('.dl').onclick = async () => {
   const code = backupEl.querySelector('.out').value;
   if (!code.startsWith(CODE_TAG)) return;
-  const a = document.createElement('a'), d = new Date();
+  const d = new Date(), name = `turtle-yard-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.txt`;
+  if (isNativeApp) {
+    try {
+      nativeFS ??= window.Capacitor.Plugins.Filesystem; nativeShare ??= window.Capacitor.Plugins.Share; // native plugin proxies
+      const { uri } = await nativeFS.writeFile({ path: name, data: code, directory: 'CACHE', encoding: 'utf8' });
+      await nativeShare.share({ title: 'Turtle Yard backup', text: 'My Turtle Yard save file', files: [uri], dialogTitle: 'Save or send your backup' });
+    } catch (e) {
+      if (!/cancel/i.test(e?.message || '')) say("Sharing didn't work here. Use 📋 Copy save code instead", 3500);
+    }
+    return;
+  }
+  const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([code], { type: 'text/plain' }));
-  a.download = `turtle-yard-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.txt`;
+  a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  say('💾 Backup file saved to your downloads (in the phone app, use Copy save code instead)', 3500);
+  say('💾 Backup file saved to your downloads', 3000);
 };
+if (isNativeApp) backupEl.querySelector('.dl').textContent = '📤 Save or share file';
 backupEl.querySelector('.load').onclick = async () => {
   try { loadSave(await readSave(backupEl.querySelector('.in').value)); } catch (e) { say('⚠️ ' + e.message, 3500); }
 };
