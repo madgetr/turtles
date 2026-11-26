@@ -24,4 +24,9 @@ for (const f of ['assets/splash.png', 'assets/splash-dark.png']) {
   await sharp({ create: { width: 2732, height: 2732, channels: 3, background: TEAL } })
     .composite([{ input: rounded, left: (2732 - R) / 2, top: (2732 - R) / 2 }]).png().toFile(f);
 }
+// Web page (GitHub Pages) favicons
+await sharp(SRC).resize(32, 32).png().toFile('icons/favicon-32.png');
+await sharp(SRC).resize(180, 180).png().toFile('icons/apple-touch-icon.png');
+await sharp(SRC).resize(192, 192).png().toFile('icons/icon-192.png');
+
 console.log('icons written');
