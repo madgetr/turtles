@@ -3229,7 +3229,7 @@ doneBtn.onclick = endArrange;
 function wash(t) {
   t.mud = 0; buzz(12); job('wash');
   for (let i = 0; i < 12; i++) emit(t.x, t.y, 'drop');
-  emit(t.x, t.y, 'sparkle', 6); earn(1, t.x, t.y - t.S * 2);
+  emit(t.x, t.y, 'sparkle', 6); earn(10, t.x, t.y - t.S * 2);
   t.st.happy = clamp(t.st.happy + 4, 0, 100);
   say(`${t.name} is squeaky clean ✨`);
 }
