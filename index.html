@@ -1,308 +1,1723 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#3d5a2a">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<title>Turtle Yard</title>
-<style>
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #3d5a2a; font-family: system-ui, sans-serif; touch-action: none; }
-  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-  #hud { position: fixed; top: 0; left: 0; right: 0; padding: calc(env(safe-area-inset-top) + 10px) 12px 10px;
-    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
-    background: linear-gradient(#000a, #0000); pointer-events: none; }
-  .stat { display: flex; align-items: center; gap: 4px; color: #fff; font-size: 15px; }
-  .bar { flex: 1; height: 10px; border-radius: 6px; background: #0006; overflow: hidden; }
-  .bar i { display: block; height: 100%; width: 50%; border-radius: 6px; background: #8fd16a; transition: width .3s, background .3s; }
-  #tools { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 10px calc(env(safe-area-inset-bottom) + 12px);
-    display: flex; justify-content: space-around; gap: 6px; background: linear-gradient(#0000, #000a); }
-  #tools button { flex: 1; max-width: 86px; border: 0; border-radius: 18px; padding: 8px 0 6px; background: #fff3; color: #fff;
-    font-size: 26px; line-height: 1.1; backdrop-filter: blur(6px); }
-  #tools button span { display: block; font-size: 11px; font-weight: 600; letter-spacing: .03em; }
-  #tools button.on { background: #fffd; color: #2c4020; box-shadow: 0 0 0 3px #b8f08c; }
-  #tools button:active { transform: scale(.94); }
-  #stage { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 38px); transform: translateX(-50%);
-    color: #fff; font-size: 13px; font-weight: 600; text-shadow: 0 1px 3px #000a; white-space: nowrap; padding: 4px 10px; cursor: pointer; max-width: calc(100vw - 130px); overflow: hidden; text-overflow: ellipsis; }
-  #adopt { position: fixed; right: 10px; top: calc(env(safe-area-inset-top) + 34px); border: 0; border-radius: 14px;
-    padding: 4px 10px; background: #fff3; color: #fff; font-size: 15px; font-weight: 700; backdrop-filter: blur(6px); }
-  #adopt:active, #stars:active { transform: scale(.94); }
-  #stars { position: fixed; left: 10px; top: calc(env(safe-area-inset-top) + 34px); border: 0; border-radius: 14px;
-    padding: 4px 10px; background: #0005; color: #ffd84a; font-size: 15px; font-weight: 800; backdrop-filter: blur(6px); }
-  #stars.bump { animation: bump .4s; }
-  #swipehint { position: fixed; top: 50%; transform: translateY(-50%); z-index: 6; display: grid; gap: 4px; justify-items: center; padding: 10px 14px; border-radius: 16px; background: #000b; color: #fff; font-size: 15px; pointer-events: none; }
-  #swipehint.right { right: 10px; } #swipehint.left { left: 10px; }
-  #swipehint span { font-size: 11px; letter-spacing: 3px; color: #ffd84a; }
-  #swipehint[hidden] { display: none; }
-  #pills { position: fixed; left: 10px; top: calc(env(safe-area-inset-top) + 66px); display: flex; gap: 6px; }
-  #pills button { border: 0; border-radius: 12px; padding: 3px 9px; background: #0005; color: #fff; font-size: 13px; font-weight: 700; backdrop-filter: blur(6px); }
-  #pills button:active { transform: scale(.94); }
-  #pills button.ready { background: #4f8f3acc; }
-  #book .set .place { border: 0; border-radius: 10px; padding: 6px 10px; margin: 0 0 6px; font-size: 13px; font-weight: 700; background: #8fd16a; color: #2c3320; }
-  #book .set .pw { font-size: 12px; color: #2c3320; background: #fbf6e8; border-radius: 8px; padding: 4px 8px; margin: 0 0 6px; }
-  .sheet { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-end; justify-content: center; z-index: 9; }
-  .sheet[hidden] { display: none; }
-  .sheet .card { width: min(420px, 96vw); max-height: 80vh; overflow: auto; margin-bottom: calc(env(safe-area-inset-bottom) + 12px); background: #fbf6e8; border-radius: 20px; padding: 14px; display: grid; gap: 10px; color: #2c3320; }
-  .sheet h2 { margin: 0; font-size: 18px; text-align: center; }
-  .sheet .sub { text-align: center; color: #6b6a55; font-size: 13px; margin-top: -6px; }
-  .sheet button.close { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
-  #book .set { background: #f1ead3; border-radius: 14px; padding: 8px 10px; }
-  #book .set .hd { display: flex; justify-content: space-between; font-weight: 700; font-size: 14px; }
-  #book .set .rw { font-size: 12px; color: #6b6a55; margin: 2px 0 6px; }
-  #book .set .rw.got { color: #4f8f3a; font-weight: 700; }
-  #book .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
-  #book .tile { border: 0; border-radius: 10px; background: #fbf6e8; padding: 4px 2px; font: inherit; color: #2c3320; display: grid; justify-items: center; gap: 1px; }
-  #book .tile .e { font-size: 26px; line-height: 1.1; }
-  #book .tile small { font-size: 10px; line-height: 1.1; text-align: center; }
-  #book .tile.no .e { filter: grayscale(1) brightness(1.6); opacity: .35; }
-  #book .tile.no small { color: #b0a888; }
-  #book .fact { position: sticky; bottom: -14px; background: #fff; border-radius: 12px; padding: 8px 10px; font-size: 13px; min-height: 18px; box-shadow: 0 -2px 8px #0001; }
-  #yards .yd { display: grid; grid-template-columns: 1fr auto; row-gap: 2px; column-gap: 10px; text-align: left; border: 0; border-radius: 14px; padding: 10px 12px; background: #f1ead3; color: #2c3320; font: inherit; }
-  #yards .yd b { font-size: 16px; }
-  #yards .yd small { grid-column: 1; color: #6b6a55; font-size: 12px; }
-  #yards .yd .st { grid-column: 2; grid-row: 1 / 3; align-self: center; font-size: 18px; }
-  #yards .yd.here { outline: 2px solid #8fd16a; }
-  #yards .yd:disabled { opacity: .45; }
-  #yards .list { display: grid; gap: 6px; }
-  #yards .acts { display: grid; gap: 6px; }
-  #yards .acts button { border: 0; border-radius: 14px; padding: 12px; font-size: 15px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
-  #yards .acts button.buy { background: #8fd16a; }
-  #yards .acts button:disabled { opacity: .45; }
-  #backup textarea { width: 100%; box-sizing: border-box; min-height: 74px; border-radius: 12px; border: 2px solid #d9d0b4; padding: 8px; font: 11px/1.3 ui-monospace, monospace; color: #2c3320; background: #fff; resize: vertical; word-break: break-all; }
-  #backup .grp { background: #f1ead3; border-radius: 14px; padding: 10px; display: grid; gap: 8px; }
-  #backup .grp b { font-size: 15px; }
-  #backup .grp small { color: #6b6a55; font-size: 12px; }
-  #backup .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  #backup button.act { border: 0; border-radius: 12px; padding: 10px; font-size: 14px; font-weight: 700; background: #e9e1c8; color: #2c3320; }
-  #backup button.go { background: #8fd16a; }
-  #jobs .job { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; background: #f1ead3; border-radius: 14px; padding: 10px 12px; font-size: 15px; }
-  #jobs .job .ck { font-size: 20px; }
-  #jobs .job .pr { font-size: 13px; color: #6b6a55; font-weight: 700; }
-  #jobs .job.done { opacity: .6; }
-  #find { position: fixed; inset: 0; background: #0006; display: flex; align-items: center; justify-content: center; z-index: 11; }
-  #find[hidden] { display: none; }
-  #find .card { width: min(320px, 88vw); background: #fbf6e8; border-radius: 22px; padding: 18px; display: grid; gap: 6px; text-align: center; color: #2c3320; animation: pop .35s; }
-  #find .big { font-size: 64px; line-height: 1.1; }
-  #find .title { font-weight: 800; font-size: 19px; }
-  #find .tag { font-size: 13px; font-weight: 700; color: #4f8f3a; }
-  #find .fact { font-size: 14px; color: #5a5946; margin: 4px 0 6px; }
-  #find button { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 700; background: #8fd16a; color: #2c3320; }
-  @keyframes pop { 0% { transform: scale(.6); opacity: 0; } 70% { transform: scale(1.05); } }
-  @keyframes bump { 40% { transform: scale(1.25); } }
-  #toybar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 92px);
-    display: flex; gap: 6px; padding: 5px; border-radius: 18px; background: #0006; backdrop-filter: blur(6px); }
-  #toybar[hidden] { display: none; }
-  #paintbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 92px); width: min(560px, 96vw);
-    display: grid; gap: 6px; padding: 8px; border-radius: 18px; background: #000a; backdrop-filter: blur(6px); z-index: 5; }
-  #paintbar[hidden] { display: none; }
-  #paintbar .sw { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
-  #paintbar .sw button { flex: 0 0 auto; border: 0; border-radius: 12px; width: 62px; padding: 4px 2px; background: #fff2; color: #fff; font: inherit; font-size: 10px; display: grid; justify-items: center; gap: 2px; }
-  #paintbar .sw button i { display: block; width: 34px; height: 24px; border-radius: 8px; box-shadow: inset 0 0 0 2px #0003; }
-  #paintbar .sw button.on { background: #fffd; color: #2c3320; box-shadow: 0 0 0 2px #b8f08c; }
-  #paintbar .row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px; align-items: center; color: #fff; font-size: 12px; }
-  #paintbar .row button { border: 0; border-radius: 12px; padding: 8px 12px; font-size: 14px; font-weight: 700; background: #fff3; color: #fff; }
-  #paintbar .row button.done { background: #8fd16a; color: #2c3320; }
-  #paintbar .row button.unlock { background: #ffd84a; color: #2c3320; }
-  #paintbar .row button[hidden] { display: none; }
-  #paintbar .sw button.locked i { opacity: .45; }
-  #arrange-done { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 96px);
-    border: 0; border-radius: 16px; padding: 10px 18px; background: #5d8a3a; color: #fff; font-size: 16px; font-weight: 700; box-shadow: 0 4px 14px #0006; }
-  #arrange-done[hidden] { display: none; }
-  #menu button[hidden] { display: none; }
-  #toybar button { border: 0; border-radius: 13px; width: 44px; height: 40px; font-size: 22px; background: #fff2; }
-  #toybar button.on { background: #fffd; box-shadow: 0 0 0 2px #b8f08c; }
-  #shop { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-end; justify-content: center; z-index: 9; }
-  #shop[hidden] { display: none; }
-  #shop .card { width: min(420px, 96vw); max-height: 78vh; overflow: auto; margin-bottom: calc(env(safe-area-inset-bottom) + 10px);
-    background: #fbf6e8; color: #2c3320; border-radius: 20px; padding: 12px 14px 16px; }
-  #shop .head { display: flex; align-items: center; gap: 10px; position: sticky; top: -12px; background: #fbf6e8; padding: 4px 0 8px; }
-  #shop .head b { font-size: 20px; flex: 1; }
-  #shop-stars { font-weight: 800; color: #b8860b; }
-  #shop-close { border: 0; background: #e9e1c8; border-radius: 12px; width: 34px; height: 34px; font-size: 16px; }
-  #shop .sec { font-weight: 700; font-size: 13px; color: #6b6a55; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .04em; }
-  #shop .row { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid #0000000d; }
-  #shop .ic { font-size: 26px; text-align: center; }
-  #shop small { display: block; color: #6b6a55; font-size: 12px; line-height: 1.3; }
-  #shop .row button { border: 0; border-radius: 12px; padding: 8px 11px; background: #5d8a3a; color: #fff; font-weight: 700; font-size: 14px; white-space: nowrap; }
-  #shop .row button:disabled { background: #cfc7ae; color: #fff; }
-  #shop .row button.move { background: #e9e1c8; color: #2c3320; }
-  #shop .done { color: #6b6a55; font-size: 12px; font-weight: 600; }
-  #away { position: fixed; inset: 0; background: #0008; display: grid; place-items: center; z-index: 10; }
-  #away[hidden] { display: none; }
-  #away .card { width: min(360px, 90vw); max-height: 80vh; overflow: auto; background: #fbf6e8; color: #2c3320; border-radius: 20px; padding: 18px 18px 14px; box-shadow: 0 10px 40px #0008; }
-  #away h2 { margin: 0 0 6px; font-size: 20px; }
-  #away .when { color: #6b6a55; font-size: 13px; margin-bottom: 10px; }
-  #away .who { font-weight: 700; margin-bottom: 2px; }
-  #away .body { font-size: 14px; line-height: 1.45; }
-  #away hr { border: 0; border-top: 1px solid #0001; margin: 10px 0; }
-  #away button { width: 100%; margin-top: 14px; border: 0; border-radius: 14px; padding: 11px; background: #5d8a3a; color: #fff; font-size: 16px; font-weight: 700; }
-  #menu { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-end; justify-content: center; z-index: 9; }
-  #menu[hidden] { display: none; }
-  #menu .card { width: min(380px, 94vw); margin-bottom: calc(env(safe-area-inset-bottom) + 16px); background: #fbf6e8; border-radius: 20px; padding: 14px; display: grid; gap: 8px; }
-  #menu .title { text-align: center; font-weight: 700; color: #2c3320; padding: 2px 0 4px; }
-  #menu .age { text-align: center; color: #6b6a55; font-size: 13px; margin-top: -6px; }
-  #menu .persona { text-align: center; color: #6b6a55; font-size: 13px; font-style: italic; margin-top: -8px; }
-  #menu .mood { text-align: center; color: #2c3320; font-size: 14px; margin-top: -2px; }
-  #menu .traits { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; padding: 4px 18px 8px; font-size: 14px; color: #2c3320; }
-  #menu .dots { color: #5d8a3a; letter-spacing: 3px; text-align: right; }
-  #menu .dots span { color: #d9d0b4; }
-  #menu button { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
-  #menu button:disabled { opacity: .4; }
-  #roster { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-end; justify-content: center; z-index: 9; }
-  #roster[hidden] { display: none; }
-  #roster .card { width: min(400px, 94vw); max-height: 75vh; margin-bottom: calc(env(safe-area-inset-bottom) + 16px); background: #fbf6e8; border-radius: 20px; padding: 14px; display: grid; grid-template-rows: auto 1fr auto; gap: 8px; }
-  #roster .title { text-align: center; font-weight: 700; color: #2c3320; }
-  #roster .list { overflow-y: auto; display: grid; gap: 6px; align-content: start; }
-  #roster .who { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto auto; column-gap: 10px; text-align: left; border: 0; border-radius: 14px; padding: 9px 12px; background: #f1ead3; color: #2c3320; font: inherit; }
-  #roster .who b { font-size: 16px; }
-  #roster .who small { grid-column: 1; color: #6b6a55; font-size: 12px; }
-  #roster .who .chips { grid-column: 2; grid-row: 1 / 3; align-self: center; font-size: 20px; letter-spacing: 2px; }
-  #roster .who .well { grid-column: 1 / 3; height: 5px; border-radius: 3px; background: #e2d9bd; margin-top: 6px; overflow: hidden; }
-  #roster .who .well i { display: block; height: 100%; border-radius: 3px; }
-  #roster button.close { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
-  #namer { position: fixed; inset: 0; background: #0006; display: flex; align-items: center; justify-content: center; z-index: 10; }
-  #namer[hidden] { display: none; }
-  #namer .card { width: min(340px, 90vw); background: #fbf6e8; border-radius: 20px; padding: 16px; display: grid; gap: 10px; }
-  #namer .title { text-align: center; font-weight: 700; color: #2c3320; }
-  #namer input { font-size: 20px; padding: 10px 12px; border-radius: 12px; border: 2px solid #d9d0b4; background: #fff; color: #2c3320; text-align: center; outline: none; }
-  #namer input:focus { border-color: #8fd16a; }
-  #namer button { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
-  #namer button.ok { background: #8fd16a; }
-  #namer .msg { text-align: center; color: #5a5946; font-size: 14px; margin-top: -4px; }
-  #namer .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  #namer .row2[hidden], #namer input[hidden], #namer .ok[hidden], #namer .msg[hidden] { display: none; }
-  #namer button.danger { background: #f0a090; }
-  #menu button.ghost { background: transparent; color: #6b6a55; }
-  #hint { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 146px); transform: translateX(-50%);
-    background: #000a; color: #fff; padding: 6px 14px; border-radius: 14px; font-size: 14px; white-space: nowrap;
-    opacity: 0; transition: opacity .3s; pointer-events: none; }
-  #hint.show { opacity: 1; }
-  /* friends & visits */
-  #friends .grp { background: #f1ead3; border-radius: 14px; padding: 10px; display: grid; gap: 8px; }
-  #friends .grp b { font-size: 15px; }
-  #friends .grp small { color: #6b6a55; font-size: 12px; }
-  #friends button.act { border: 0; border-radius: 12px; padding: 10px; font-size: 14px; font-weight: 700; background: #e9e1c8; color: #2c3320; }
-  #friends button.go { background: #8fd16a; }
-  #friends button:disabled { opacity: .45; }
-  #friends .code { font: 700 34px/1.1 ui-monospace, monospace; letter-spacing: 6px; text-align: center; color: #2c3320; }
-  #friends .row2 { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-  #friends input { font: 700 22px ui-monospace, monospace; letter-spacing: 4px; text-align: center; padding: 8px; border-radius: 12px; border: 2px solid #d9d0b4; background: #fff; color: #2c3320; min-width: 0; outline: none; }
-  #friends input:focus { border-color: #8fd16a; }
-  #friends .list { display: grid; gap: 6px; }
-  #friends .fr { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 8px; background: #f1ead3; border-radius: 14px; padding: 8px 10px; }
-  #friends .fr .nm { border: 0; background: none; text-align: left; font: inherit; font-weight: 700; color: #2c3320; padding: 0; }
-  #friends .fr small { display: block; font-weight: 400; color: #6b6a55; font-size: 12px; }
-  #friends .fr.wide { grid-template-columns: auto 1fr auto auto auto; }
-  #friends .fr button.pkg { padding: 10px; white-space: nowrap; }
-  #friends .fr .nm { min-width: 0; overflow-wrap: anywhere; }
-  #friends .fr button.pkg.done { background: #f1ead3; opacity: .7; }
-  #friends .fr .dot { width: 10px; height: 10px; border-radius: 50%; background: #c9c1a6; }
-  #friends .fr .dot.on { background: #4fb33a; }
-  #friends .fr button.x { border: 0; background: none; color: #8a8770; font-size: 16px; padding: 4px; }
-  #friends .empty { text-align: center; color: #6b6a55; font-size: 13px; }
-  #ask { position: fixed; inset: 0; background: #0006; display: flex; align-items: center; justify-content: center; z-index: 11; }
-  #ask[hidden] { display: none; }
-  #ask .card { width: min(340px, 90vw); background: #fbf6e8; border-radius: 20px; padding: 16px; display: grid; gap: 10px; color: #2c3320; text-align: center; }
-  #ask .title { font-weight: 700; font-size: 17px; }
-  #ask .msg { color: #5a5946; font-size: 14px; }
-  #ask .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  #ask button { border: 0; border-radius: 14px; padding: 12px; font-size: 16px; font-weight: 600; background: #e9e1c8; color: #2c3320; }
-  #ask button.yes { background: #8fd16a; }
-  #visitbar { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 10px); transform: translateX(-50%); z-index: 8; display: flex; align-items: center; gap: 10px;
-    background: #000a; color: #fff; padding: 6px 6px 6px 14px; border-radius: 16px; font-size: 14px; font-weight: 600; max-width: 94vw; backdrop-filter: blur(6px); }
-  #visitbar[hidden] { display: none; }
-  #visitbar.host { top: calc(env(safe-area-inset-top) + 98px); }
-  #visitbar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #visitbar button { border: 0; border-radius: 12px; padding: 6px 12px; font-size: 14px; font-weight: 700; background: #8fd16a; color: #2c3320; white-space: nowrap; }
-  body.visiting #hud, body.visiting #stage, body.visiting #stars, body.visiting #pills, body.visiting #tools, body.visiting #toybar, body.visiting #paintbar { visibility: hidden; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#3d5a2a">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <title>Turtle Yard</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #3d5a2a;
+      font-family: system-ui, sans-serif;
+      touch-action: none;
+    }
+
+    canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    #hud {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: calc(env(safe-area-inset-top) + 10px) 12px 10px;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      background: linear-gradient(#000a, #0000);
+      pointer-events: none;
+    }
+
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: #fff;
+      font-size: 15px;
+    }
+
+    .bar {
+      flex: 1;
+      height: 10px;
+      border-radius: 6px;
+      background: #0006;
+      overflow: hidden;
+    }
+
+    .bar i {
+      display: block;
+      height: 100%;
+      width: 50%;
+      border-radius: 6px;
+      background: #8fd16a;
+      transition: width .3s, background .3s;
+    }
+
+    #tools {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 10px 10px calc(env(safe-area-inset-bottom) + 12px);
+      display: flex;
+      justify-content: space-around;
+      gap: 6px;
+      background: linear-gradient(#0000, #000a);
+    }
+
+    #tools button {
+      flex: 1;
+      max-width: 86px;
+      border: 0;
+      border-radius: 18px;
+      padding: 8px 0 6px;
+      background: #fff3;
+      color: #fff;
+      font-size: 26px;
+      line-height: 1.1;
+      backdrop-filter: blur(6px);
+    }
+
+    #tools button span {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .03em;
+    }
+
+    #tools button.on {
+      background: #fffd;
+      color: #2c4020;
+      box-shadow: 0 0 0 3px #b8f08c;
+    }
+
+    #tools button:active {
+      transform: scale(.94);
+    }
+
+    #stage {
+      position: fixed;
+      left: 50%;
+      top: calc(env(safe-area-inset-top) + 38px);
+      transform: translateX(-50%);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      text-shadow: 0 1px 3px #000a;
+      white-space: nowrap;
+      padding: 4px 10px;
+      cursor: pointer;
+      max-width: calc(100vw - 130px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #adopt {
+      position: fixed;
+      right: 10px;
+      top: calc(env(safe-area-inset-top) + 34px);
+      border: 0;
+      border-radius: 14px;
+      padding: 4px 10px;
+      background: #fff3;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      backdrop-filter: blur(6px);
+    }
+
+    #adopt:active,
+    #stars:active {
+      transform: scale(.94);
+    }
+
+    #stars {
+      position: fixed;
+      left: 10px;
+      top: calc(env(safe-area-inset-top) + 34px);
+      border: 0;
+      border-radius: 14px;
+      padding: 4px 10px;
+      background: #0005;
+      color: #ffd84a;
+      font-size: 15px;
+      font-weight: 800;
+      backdrop-filter: blur(6px);
+    }
+
+    #stars.bump {
+      animation: bump .4s;
+    }
+
+    #swipehint {
+      position: fixed;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 6;
+      display: grid;
+      gap: 4px;
+      justify-items: center;
+      padding: 10px 14px;
+      border-radius: 16px;
+      background: #000b;
+      color: #fff;
+      font-size: 15px;
+      pointer-events: none;
+    }
+
+    #swipehint.right {
+      right: 10px;
+    }
+
+    #swipehint.left {
+      left: 10px;
+    }
+
+    #swipehint span {
+      font-size: 11px;
+      letter-spacing: 3px;
+      color: #ffd84a;
+    }
+
+    #swipehint[hidden] {
+      display: none;
+    }
+
+#menu-wrap {
+  position: fixed;
+  right: 10px;
+  top: calc(env(safe-area-inset-top) + 34px);
+  z-index: 7;
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+#menu-pill {
+  position: relative;
+  border: 0;
+  border-radius: 14px;
+  padding: 5px 12px;
+  background: #0006;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+#menu-pill:active {
+  transform: scale(.95);
+}
+
+#menu-pill.has-ready::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8fd16a;
+  box-shadow: 0 0 0 2px #2c4020;
+}
+
+#pill-drawer {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+#pill-drawer[hidden] {
+  display: none;
+}
+
+#pill-drawer button {
+  width: max-content;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  border: 0;
+  border-radius: 14px;
+  padding: 7px 12px;
+  background: #0006;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: right;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+#pill-drawer button:active {
+  transform: scale(.96);
+}
+
+#pill-drawer button.ready,
+#friends-btn.online {
+  background: #4f8f3acc;
+  box-shadow: 0 0 0 2px #b8f08c;
+}
+
+#pill-drawer .badge {
+  font-size: 12px;
+  opacity: .85;
+}
+
+    #book .set .place {
+      border: 0;
+      border-radius: 10px;
+      padding: 6px 10px;
+      margin: 0 0 6px;
+      font-size: 13px;
+      font-weight: 700;
+      background: #8fd16a;
+      color: #2c3320;
+    }
+
+    #book .set .pw {
+      font-size: 12px;
+      color: #2c3320;
+      background: #fbf6e8;
+      border-radius: 8px;
+      padding: 4px 8px;
+      margin: 0 0 6px;
+    }
+
+    .sheet {
+      position: fixed;
+      inset: 0;
+      background: #0006;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 9;
+    }
+
+    .sheet[hidden] {
+      display: none;
+    }
+
+    .sheet .card {
+      width: min(420px, 96vw);
+      max-height: 80vh;
+      overflow: auto;
+      margin-bottom: calc(env(safe-area-inset-bottom) + 12px);
+      background: #fbf6e8;
+      border-radius: 20px;
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      color: #2c3320;
+    }
+
+    .sheet h2 {
+      margin: 0;
+      font-size: 18px;
+      text-align: center;
+    }
+
+    .sheet .sub {
+      text-align: center;
+      color: #6b6a55;
+      font-size: 13px;
+      margin-top: -6px;
+    }
+
+    .sheet button.close {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      background: #e9e1c8;
+      color: #2c3320;
+    }
+
+    #book .set {
+      background: #f1ead3;
+      border-radius: 14px;
+      padding: 8px 10px;
+    }
+
+    #book .set .hd {
+      display: flex;
+      justify-content: space-between;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    #book .set .rw {
+      font-size: 12px;
+      color: #6b6a55;
+      margin: 2px 0 6px;
+    }
+
+    #book .set .rw.got {
+      color: #4f8f3a;
+      font-weight: 700;
+    }
+
+    #book .tiles {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 4px;
+    }
+
+    #book .tile {
+      border: 0;
+      border-radius: 10px;
+      background: #fbf6e8;
+      padding: 4px 2px;
+      font: inherit;
+      color: #2c3320;
+      display: grid;
+      justify-items: center;
+      gap: 1px;
+    }
+
+    #book .tile .e {
+      font-size: 26px;
+      line-height: 1.1;
+    }
+
+    #book .tile small {
+      font-size: 10px;
+      line-height: 1.1;
+      text-align: center;
+    }
+
+    #book .tile.no .e {
+      filter: grayscale(1) brightness(1.6);
+      opacity: .35;
+    }
+
+    #book .tile.no small {
+      color: #b0a888;
+    }
+
+    #book .fact {
+      position: sticky;
+      bottom: -14px;
+      background: #fff;
+      border-radius: 12px;
+      padding: 8px 10px;
+      font-size: 13px;
+      min-height: 18px;
+      box-shadow: 0 -2px 8px #0001;
+    }
+
+    #yards .yd {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      row-gap: 2px;
+      column-gap: 10px;
+      text-align: left;
+      border: 0;
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: #f1ead3;
+      color: #2c3320;
+      font: inherit;
+    }
+
+    #yards .yd b {
+      font-size: 16px;
+    }
+
+    #yards .yd small {
+      grid-column: 1;
+      color: #6b6a55;
+      font-size: 12px;
+    }
+
+    #yards .yd .st {
+      grid-column: 2;
+      grid-row: 1 / 3;
+      align-self: center;
+      font-size: 18px;
+    }
+
+    #yards .yd.here {
+      outline: 2px solid #8fd16a;
+    }
+
+    #yards .yd:disabled {
+      opacity: .45;
+    }
+
+    #yards .list {
+      display: grid;
+      gap: 6px;
+    }
+
+    #yards .acts {
+      display: grid;
+      gap: 6px;
+    }
+
+    #yards .acts button {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      background: #e9e1c8;
+      color: #2c3320;
+    }
+
+    #yards .acts button.buy {
+      background: #8fd16a;
+    }
+
+    #yards .acts button:disabled {
+      opacity: .45;
+    }
+
+    #backup textarea {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 74px;
+      border-radius: 12px;
+      border: 2px solid #d9d0b4;
+      padding: 8px;
+      font: 11px/1.3 ui-monospace, monospace;
+      color: #2c3320;
+      background: #fff;
+      resize: vertical;
+      word-break: break-all;
+    }
+
+    #backup .grp {
+      background: #f1ead3;
+      border-radius: 14px;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    #backup .grp b {
+      font-size: 15px;
+    }
+
+    #backup .grp small {
+      color: #6b6a55;
+      font-size: 12px;
+    }
+
+    #backup .row2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    #backup button.act {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      background: #e9e1c8;
+      color: #2c3320;
+    }
+
+    #backup button.go {
+      background: #8fd16a;
+    }
+
+    #jobs .job {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 10px;
+      align-items: center;
+      background: #f1ead3;
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-size: 15px;
+    }
+
+    #jobs .job .ck {
+      font-size: 20px;
+    }
+
+    #jobs .job .pr {
+      font-size: 13px;
+      color: #6b6a55;
+      font-weight: 700;
+    }
+
+    #jobs .job.done {
+      opacity: .6;
+    }
+
+    #find {
+      position: fixed;
+      inset: 0;
+      background: #0006;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 11;
+    }
+
+    #find[hidden] {
+      display: none;
+    }
+
+    #find .card {
+      width: min(320px, 88vw);
+      background: #fbf6e8;
+      border-radius: 22px;
+      padding: 18px;
+      display: grid;
+      gap: 6px;
+      text-align: center;
+      color: #2c3320;
+      animation: pop .35s;
+    }
+
+    #find .big {
+      font-size: 64px;
+      line-height: 1.1;
+    }
+
+    #find .title {
+      font-weight: 800;
+      font-size: 19px;
+    }
+
+    #find .tag {
+      font-size: 13px;
+      font-weight: 700;
+      color: #4f8f3a;
+    }
+
+    #find .fact {
+      font-size: 14px;
+      color: #5a5946;
+      margin: 4px 0 6px;
+    }
+
+    #find button {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      background: #8fd16a;
+      color: #2c3320;
+    }
+
+    @keyframes pop {
+      0% {
+        transform: scale(.6);
+        opacity: 0;
+      }
+
+      70% {
+        transform: scale(1.05);
+      }
+    }
+
+    @keyframes bump {
+      40% {
+        transform: scale(1.25);
+      }
+    }
+
+    #toybar {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: calc(env(safe-area-inset-bottom) + 92px);
+      display: flex;
+      gap: 6px;
+      padding: 5px;
+      border-radius: 18px;
+      background: #0006;
+      backdrop-filter: blur(6px);
+    }
+
+    #toybar[hidden] {
+      display: none;
+    }
+
+    #paintbar {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: calc(env(safe-area-inset-bottom) + 92px);
+      width: min(560px, 96vw);
+      display: grid;
+      gap: 6px;
+      padding: 8px;
+      border-radius: 18px;
+      background: #000a;
+      backdrop-filter: blur(6px);
+      z-index: 5;
+    }
+
+    #paintbar[hidden] {
+      display: none;
+    }
+
+    #paintbar .sw {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    #paintbar .sw button {
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 12px;
+      width: 62px;
+      padding: 4px 2px;
+      background: #fff2;
+      color: #fff;
+      font: inherit;
+      font-size: 10px;
+      display: grid;
+      justify-items: center;
+      gap: 2px;
+    }
+
+    #paintbar .sw button i {
+      display: block;
+      width: 34px;
+      height: 24px;
+      border-radius: 8px;
+      box-shadow: inset 0 0 0 2px #0003;
+    }
+
+    #paintbar .sw button.on {
+      background: #fffd;
+      color: #2c3320;
+      box-shadow: 0 0 0 2px #b8f08c;
+    }
+
+    #paintbar .row {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 6px;
+      align-items: center;
+      color: #fff;
+      font-size: 12px;
+    }
+
+    #paintbar .row button {
+      border: 0;
+      border-radius: 12px;
+      padding: 8px 12px;
+      font-size: 14px;
+      font-weight: 700;
+      background: #fff3;
+      color: #fff;
+    }
+
+    #paintbar .row button.done {
+      background: #8fd16a;
+      color: #2c3320;
+    }
+
+    #paintbar .row button.unlock {
+      background: #ffd84a;
+      color: #2c3320;
+    }
+
+    #paintbar .row button[hidden] {
+      display: none;
+    }
+
+    #paintbar .sw button.locked i {
+      opacity: .45;
+    }
+
+    #arrange-done {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: calc(env(safe-area-inset-bottom) + 96px);
+      border: 0;
+      border-radius: 16px;
+      padding: 10px 18px;
+      background: #5d8a3a;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      box-shadow: 0 4px 14px #0006;
+    }
+
+    #arrange-done[hidden] {
+      display: none;
+    }
+
+    #menu button[hidden] {
+      display: none;
+    }
+
+    #toybar button {
+      border: 0;
+      border-radius: 13px;
+      width: 44px;
+      height: 40px;
+      font-size: 22px;
+      background: #fff2;
+    }
+
+    #toybar button.on {
+      background: #fffd;
+      box-shadow: 0 0 0 2px #b8f08c;
+    }
+
+    #shop {
+      position: fixed;
+      inset: 0;
+      background: #0006;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 9;
+    }
+
+    #shop[hidden] {
+      display: none;
+    }
+
+    #shop .card {
+      width: min(420px, 96vw);
+      max-height: 78vh;
+      overflow: auto;
+      margin-bottom: calc(env(safe-area-inset-bottom) + 10px);
+      background: #fbf6e8;
+      color: #2c3320;
+      border-radius: 20px;
+      padding: 12px 14px 16px;
+    }
+
+    #shop .head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: sticky;
+      top: -12px;
+      background: #fbf6e8;
+      padding: 4px 0 8px;
+    }
+
+    #shop .head b {
+      font-size: 20px;
+      flex: 1;
+    }
+
+    #shop-stars {
+      font-weight: 800;
+      color: #b8860b;
+    }
+
+    #shop-close {
+      border: 0;
+      background: #e9e1c8;
+      border-radius: 12px;
+      width: 34px;
+      height: 34px;
+      font-size: 16px;
+    }
+
+    #shop .sec {
+      font-weight: 700;
+      font-size: 13px;
+      color: #6b6a55;
+      margin: 12px 0 4px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    #shop .row {
+      display: grid;
+      grid-template-columns: 36px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 7px 0;
+      border-bottom: 1px solid #0000000d;
+    }
+
+    #shop .ic {
+      font-size: 26px;
+      text-align: center;
+    }
+
+    #shop small {
+      display: block;
+      color: #6b6a55;
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    #shop .row button {
+      border: 0;
+      border-radius: 12px;
+      padding: 8px 11px;
+      background: #5d8a3a;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    #shop .row button:disabled {
+      background: #cfc7ae;
+      color: #fff;
+    }
+
+    #shop .row button.move {
+      background: #e9e1c8;
+      color: #2c3320;
+    }
+
+    #shop .done {
+      color: #6b6a55;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    #away {
+      position: fixed;
+      inset: 0;
+      background: #0008;
+      display: grid;
+      place-items: center;
+      z-index: 10;
+    }
+
+    #away[hidden] {
+      display: none;
+    }
+
+    #away .card {
+      width: min(360px, 90vw);
+      max-height: 80vh;
+      overflow: auto;
+      background: #fbf6e8;
+      color: #2c3320;
+      border-radius: 20px;
+      padding: 18px 18px 14px;
+      box-shadow: 0 10px 40px #0008;
+    }
+
+    #away h2 {
+      margin: 0 0 6px;
+      font-size: 20px;
+    }
+
+    #away .when {
+      color: #6b6a55;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+
+    #away .who {
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+
+    #away .body {
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    #away hr {
+      border: 0;
+      border-top: 1px solid #0001;
+      margin: 10px 0;
+    }
+
+    #away button {
+      width: 100%;
+      margin-top: 14px;
+      border: 0;
+      border-radius: 14px;
+      padding: 11px;
+      background: #5d8a3a;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    #menu {
+      position: fixed;
+      inset: 0;
+      background: #0006;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 9;
+    }
+
+    #menu[hidden] {
+      display: none;
+    }
+
+    #menu .card {
+      width: min(380px, 94vw);
+      margin-bottom: calc(env(safe-area-inset-bottom) + 16px);
+      background: #fbf6e8;
+      border-radius: 20px;
+      padding: 14px;
+      display: grid;
+      gap: 8px;
+    }
+
+    #menu .title {
+      text-align: center;
+      font-weight: 700;
+      color: #2c3320;
+      padding: 2px 0 4px;
+    }
+
+    #menu .age {
+      text-align: center;
+      color: #6b6a55;
+      font-size: 13px;
+      margin-top: -6px;
+    }
+
+    #menu .persona {
+      text-align: center;
+      color: #6b6a55;
+      font-size: 13px;
+      font-style: italic;
+      margin-top: -8px;
+    }
+
+    #menu .mood {
+      text-align: center;
+      color: #2c3320;
+      font-size: 14px;
+      margin-top: -2px;
+    }
+
+    #menu .traits {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 4px 14px;
+      padding: 4px 18px 8px;
+      font-size: 14px;
+      color: #2c3320;
+    }
+
+    #menu .dots {
+      color: #5d8a3a;
+      letter-spacing: 3px;
+      text-align: right;
+    }
+
+    #menu .dots span {
+      color: #d9d0b4;
+    }
+
+    #menu button {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      background: #e9e1c8;
+      color: #2c3320;
+    }
+
+    #menu button:disabled {
+      opacity: .4;
+    }
+
+    #roster {
+      position: fixed;
+      inset: 0;
+      background: #0006;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 9;
+    }
+
+    #roster[hidden] {
+      display: none;
+    }
+
+    #roster .card {
+      width: min(400px, 94vw);
+      max-height: 75vh;
+      margin-bottom: calc(env(safe-area-inset-bottom) + 16px);
+      background: #fbf6e8;
+      border-radius: 20px;
+      padding: 14px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 8px;
+    }
+
+    #roster .title {
+      text-align: center;
+      font-weight: 700;
+      color: #2c3320;
+    }
+
+    #roster .list {
+      overflow-y: auto;
+      display: grid;
+      gap: 6px;
+      align-content: start;
+    }
+
+    #roster .who {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: auto auto auto;
+      column-gap: 10px;
+      text-align: left;
+      border: 0;
+      border-radius: 14px;
+      padding: 9px 12px;
+      background: #f1ead3;
+      color: #2c3320;
+      font: inherit;
+    }
+
+    #roster .who b {
+      font-size: 16px;
+    }
+
+    #roster .who small {
+      grid-column: 1;
+      color: #6b6a55;
+      font-size: 12px;
+    }
+
+    #roster .who .chips {
+      grid-column: 2;
+      grid-row: 1 / 3;
+      align-self: center;
+      font-size: 20px;
+      letter-spacing: 2px;
+    }
+
+    #roster .who .well {
+      grid-column: 1 / 3;
+      height: 5px;
+      border-radius: 3px;
+      background: #e2d9bd;
+      margin-top: 6px;
+      overflow: hidden;
+    }
+
+    #roster .who .well i {
+      display: block;
+      height: 100%;
+      border-radius: 3px;
+    }
+
+    #roster button.close {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      background: #e9e1c8;
+      color: #2c3320;
+    }
+
+    #namer {
+      position: fixed;
+      inset: 0;
+      background: #0006;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    #namer[hidden] {
+      display: none;
+    }
+
+    #namer .card {
+      width: min(340px, 90vw);
+      background: #fbf6e8;
+      border-radius: 20px;
+      padding: 16px;
+      display: grid;
+      gap: 10px;
+    }
+
+    #namer .title {
+      text-align: center;
+      font-weight: 700;
+      color: #2c3320;
+    }
+
+    #namer input {
+      font-size: 20px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 2px solid #d9d0b4;
+      background: #fff;
+      color: #2c3320;
+      text-align: center;
+      outline: none;
+    }
+
+    #namer input:focus {
+      border-color: #8fd16a;
+    }
+
+    #namer button {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      background: #e9e1c8;
+      color: #2c3320;
+    }
+
+    #namer button.ok {
+      background: #8fd16a;
+    }
+
+    #namer .msg {
+      text-align: center;
+      color: #5a5946;
+      font-size: 14px;
+      margin-top: -4px;
+    }
+
+    #namer .row2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    #namer .row2[hidden],
+    #namer input[hidden],
+    #namer .ok[hidden],
+    #namer .msg[hidden] {
+      display: none;
+    }
+
+    #namer button.danger {
+      background: #f0a090;
+    }
+
+    #menu button.ghost {
+      background: transparent;
+      color: #6b6a55;
+    }
+
+    #hint {
+      position: fixed;
+      left: 50%;
+      bottom: calc(env(safe-area-inset-bottom) + 146px);
+      transform: translateX(-50%);
+      background: #000a;
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 14px;
+      font-size: 14px;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity .3s;
+      pointer-events: none;
+    }
+
+    #hint.show {
+      opacity: 1;
+    }
+
+    /* friends & visits */
+    #friends .grp {
+      background: #f1ead3;
+      border-radius: 14px;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    #friends .grp b {
+      font-size: 15px;
+    }
+
+    #friends .grp small {
+      color: #6b6a55;
+      font-size: 12px;
+    }
+
+    #friends button.act {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      background: #e9e1c8;
+      color: #2c3320;
+    }
+
+    #friends button.go {
+      background: #8fd16a;
+    }
+
+    #friends button:disabled {
+      opacity: .45;
+    }
+
+    #friends .code {
+      font: 700 34px/1.1 ui-monospace, monospace;
+      letter-spacing: 6px;
+      text-align: center;
+      color: #2c3320;
+    }
+
+    #friends .row2 {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+
+    #friends input {
+      font: 700 22px ui-monospace, monospace;
+      letter-spacing: 4px;
+      text-align: center;
+      padding: 8px;
+      border-radius: 12px;
+      border: 2px solid #d9d0b4;
+      background: #fff;
+      color: #2c3320;
+      min-width: 0;
+      outline: none;
+    }
+
+    #friends input:focus {
+      border-color: #8fd16a;
+    }
+
+    #friends .list {
+      display: grid;
+      gap: 6px;
+    }
+
+    #friends .fr {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      align-items: center;
+      gap: 8px;
+      background: #f1ead3;
+      border-radius: 14px;
+      padding: 8px 10px;
+    }
+
+    #friends .fr .nm {
+      border: 0;
+      background: none;
+      text-align: left;
+      font: inherit;
+      font-weight: 700;
+      color: #2c3320;
+      padding: 0;
+    }
+
+    #friends .fr small {
+      display: block;
+      font-weight: 400;
+      color: #6b6a55;
+      font-size: 12px;
+    }
+
+    #friends .fr.wide {
+      grid-template-columns: auto 1fr auto auto auto;
+    }
+
+    #friends .fr button.pkg {
+      padding: 10px;
+      white-space: nowrap;
+    }
+
+    #friends .fr .nm {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    #friends .fr button.pkg.done {
+      background: #f1ead3;
+      opacity: .7;
+    }
+
+    #friends .fr .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #c9c1a6;
+    }
+
+    #friends .fr .dot.on {
+      background: #4fb33a;
+    }
+
+    #friends .fr button.x {
+      border: 0;
+      background: none;
+      color: #8a8770;
+      font-size: 16px;
+      padding: 4px;
+    }
+
+    #friends .empty {
+      text-align: center;
+      color: #6b6a55;
+      font-size: 13px;
+    }
+
+    #ask {
+      position: fixed;
+      inset: 0;
+      background: #0006;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 11;
+    }
+
+    #ask[hidden] {
+      display: none;
+    }
+
+    #ask .card {
+      width: min(340px, 90vw);
+      background: #fbf6e8;
+      border-radius: 20px;
+      padding: 16px;
+      display: grid;
+      gap: 10px;
+      color: #2c3320;
+      text-align: center;
+    }
+
+    #ask .title {
+      font-weight: 700;
+      font-size: 17px;
+    }
+
+    #ask .msg {
+      color: #5a5946;
+      font-size: 14px;
+    }
+
+    #ask .row2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    #ask button {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      background: #e9e1c8;
+      color: #2c3320;
+    }
+
+    #ask button.yes {
+      background: #8fd16a;
+    }
+
+    #visitbar {
+      position: fixed;
+      left: 50%;
+      top: calc(env(safe-area-inset-top) + 10px);
+      transform: translateX(-50%);
+      z-index: 8;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #000a;
+      color: #fff;
+      padding: 6px 6px 6px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      font-weight: 600;
+      max-width: 94vw;
+      backdrop-filter: blur(6px);
+    }
+
+    #visitbar[hidden] {
+      display: none;
+    }
+
+    #visitbar.host {
+      top: calc(env(safe-area-inset-top) + 98px);
+    }
+
+    #visitbar span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #visitbar button {
+      border: 0;
+      border-radius: 12px;
+      padding: 6px 12px;
+      font-size: 14px;
+      font-weight: 700;
+      background: #8fd16a;
+      color: #2c3320;
+      white-space: nowrap;
+    }
+
+body.visiting #hud,
+body.visiting #stage,
+body.visiting #stars,
+body.visiting #menu-wrap,
+body.visiting #tools,
+body.visiting #toybar,
+body.visiting #paintbar {
+  visibility: hidden;
+}
+  </style>
 </head>
+
 <body>
-<canvas id="c"></canvas>
-<div id="hud">
-  <div class="stat">❤️<div class="bar"><i id="b-health"></i></div></div>
-  <div class="stat">🥬<div class="bar"><i id="b-hunger"></i></div></div>
-  <div class="stat">💧<div class="bar"><i id="b-thirst"></i></div></div>
-  <div class="stat">🧼<div class="bar"><i id="b-clean"></i></div></div>
-  <div class="stat">💚<div class="bar"><i id="b-happy"></i></div></div>
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div class="stat">❤️<div class="bar"><i id="b-health"></i></div>
+    </div>
+    <div class="stat">🥬<div class="bar"><i id="b-hunger"></i></div>
+    </div>
+    <div class="stat">💧<div class="bar"><i id="b-thirst"></i></div>
+    </div>
+    <div class="stat">🧼<div class="bar"><i id="b-clean"></i></div>
+    </div>
+    <div class="stat">💚<div class="bar"><i id="b-happy"></i></div>
+    </div>
+  </div>
+  <div id="stage"></div>
+  <button id="stars">⭐ 0</button>
+  <div id="menu-wrap">
+  <button id="menu-pill" type="button" aria-expanded="false" aria-controls="pill-drawer">☰ Menu</button>
+  <div id="pill-drawer" hidden>
+    <button id="book-btn" type="button">📖 Collection <span class="badge" data-for="book"></span></button>
+    <button id="jobs-btn" type="button">📋 Today's jobs <span class="badge" data-for="jobs"></span></button>
+    <button id="yards-btn" type="button">🏡 Yards</button>
+    <button id="friends-btn" type="button">👫 Friends</button>
+    <button id="snd-btn" type="button">🔊 Sound</button>
+  </div>
 </div>
-<div id="stage"></div>
-<button id="stars">⭐ 0</button>
-<div id="pills"><button id="book-btn">📖 0</button><button id="jobs-btn">📋 0/3</button><button id="snd-btn">🔊</button><button id="yards-btn">🏡</button><button id="friends-btn">👫</button></div>
-<div id="backup" class="sheet" hidden><div class="card">
-  <h2>💾 Save &amp; load</h2>
-  <div class="sub">Back up your whole game: every yard, turtle, star and find</div>
-  <div class="grp"><b>Save</b><small>Copy the save code and keep it somewhere safe (a note, an email, a message to yourself), or download it as a file.</small>
-    <textarea class="out" readonly></textarea>
-    <div class="row2"><button class="act copy">📋 Copy save code</button><button class="act dl">💾 Download file</button></div></div>
-  <div class="grp"><b>Load</b><small>Paste a save code, or open a backup file. This replaces the game on this device.</small>
-    <textarea class="in" placeholder="Paste a save code here"></textarea>
-    <div class="row2"><button class="act file">📂 Open file</button><button class="act go load">⬆️ Load code</button></div>
-    <input type="file" class="pick" accept=".txt,.json,text/plain,application/json" hidden></div>
-  <button class="close">Close</button>
-</div></div>
-<div id="yards" class="sheet" hidden><div class="card"><h2></h2><div class="sub"></div><div class="list"></div><div class="acts"></div><button class="close">Close</button></div></div>
-<div id="friends" class="sheet" hidden><div class="card">
-  <h2>👫 Friends</h2>
-  <div class="sub"></div>
-  <div class="grp host"><b>Invite a friend over</b><small>Get a code and tell it to your friend. You choose who comes in.</small>
-    <div class="code" hidden></div>
-    <button class="act go open">🔑 Get a visit code</button></div>
-  <div class="grp"><b>Visit a friend</b><small>Type the code from your friend's game.</small>
-    <div class="row2"><input class="in" inputmode="numeric" maxlength="6" placeholder="······" autocomplete="off"><button class="act go knock">👀 Visit</button></div></div>
-  <div class="list"></div>
-  <button class="close">Close</button>
-</div></div>
-<div id="ask" hidden><div class="card"><div class="title"></div><div class="msg"></div><div class="row2"><button class="no"></button><button class="yes"></button></div></div></div>
-<div id="visitbar" hidden><span></span><button></button></div>
-<div id="book" class="sheet" hidden><div class="card"><h2>📖 Collection</h2><div class="sub"></div><div class="sets"></div><div class="fact">Tap a find to read about it.</div><button class="close">Close</button></div></div>
-<div id="jobs" class="sheet" hidden><div class="card"><h2>📋 Today's jobs</h2><div class="sub"></div><div class="list"></div><button class="close">Close</button></div></div>
-<div id="find" hidden><div class="card"><div class="big"></div><div class="title"></div><div class="tag"></div><div class="fact"></div><button>Yay!</button></div></div>
-<div id="toybar" hidden></div>
-<div id="paintbar" hidden><div class="sw"></div><div class="row"><span class="info"></span><button class="unlock" hidden></button><button class="brush">Brush</button><button class="done">✓ Done</button></div></div>
-<button id="arrange-done" hidden>✓ Done arranging</button>
-<div id="hint"></div>
-<div id="swipehint" hidden></div>
-<div id="shop" hidden><div class="card">
-  <div class="head"><b>Shop</b><span id="shop-stars"></span><button id="shop-close">✕</button></div>
-  <div id="shop-list"></div>
-</div></div>
-<div id="menu" hidden><div class="card">
-  <div class="title"></div>
-  <div class="persona"></div>
-  <div class="age"></div>
-  <div class="mood"></div>
-  <div class="traits"></div>
-  <button id="m-rename">✏️ Rename</button>
-  <button id="m-vet" hidden>💊 Use vet kit</button>
-  <button id="m-move">🚚 Move to another yard</button>
-  <button id="m-gift" hidden>🎁 Give to a friend</button>
-  <button id="m-release">🌿 Release to the wild</button>
-  <button id="m-close" class="ghost">Cancel</button>
-</div></div>
-<div id="roster" hidden><div class="card">
-  <div class="title"></div>
-  <div class="list"></div>
-  <button class="close">Close</button>
-</div></div>
-<div id="namer" hidden><div class="card">
-  <div class="title"></div>
-  <input maxlength="14" autocomplete="off" enterkeyhint="done">
-  <div class="msg" hidden></div>
-  <button class="ok">OK</button>
-  <div class="row2" hidden><button class="no">Cancel</button><button class="yes danger">Yes</button></div>
-</div></div>
-<div id="away" hidden><div class="card"><h2>Welcome back! 🐢</h2><div class="body"></div><button id="away-ok">Check on them</button></div></div>
-<div id="tools">
-  <button data-mode="walk" class="on">👆<span>Call</span></button>
-  <button data-mode="food">🥬<span>Feed</span></button>
-  <button data-act="water">💧<span>Water</span></button>
-  <button data-mode="clean">🧹<span>Clean</span></button>
-  <button data-mode="play">🎾<span>Play</span></button>
-</div>
-<script type="module" src="js/game.js"></script>
+  <div id="backup" class="sheet" hidden>
+    <div class="card">
+      <h2>💾 Save &amp; load</h2>
+      <div class="sub">Back up your whole game: every yard, turtle, star and find</div>
+      <div class="grp"><b>Save</b><small>Copy the save code and keep it somewhere safe (a note, an email, a message to
+          yourself), or download it as a file.</small>
+        <textarea class="out" readonly></textarea>
+        <div class="row2"><button class="act copy">📋 Copy save code</button><button class="act dl">💾 Download
+            file</button></div>
+      </div>
+      <div class="grp"><b>Load</b><small>Paste a save code, or open a backup file. This replaces the game on this
+          device.</small>
+        <textarea class="in" placeholder="Paste a save code here"></textarea>
+        <div class="row2"><button class="act file">📂 Open file</button><button class="act go load">⬆️ Load
+            code</button></div>
+        <input type="file" class="pick" accept=".txt,.json,text/plain,application/json" hidden>
+      </div>
+      <button class="close">Close</button>
+    </div>
+  </div>
+  <div id="yards" class="sheet" hidden>
+    <div class="card">
+      <h2></h2>
+      <div class="sub"></div>
+      <div class="list"></div>
+      <div class="acts"></div><button class="close">Close</button>
+    </div>
+  </div>
+  <div id="friends" class="sheet" hidden>
+    <div class="card">
+      <h2>👫 Friends</h2>
+      <div class="sub"></div>
+      <div class="grp host"><b>Invite a friend over</b><small>Get a code and tell it to your friend. You choose who
+          comes in.</small>
+        <div class="code" hidden></div>
+        <button class="act go open">🔑 Get a visit code</button>
+      </div>
+      <div class="grp"><b>Visit a friend</b><small>Type the code from your friend's game.</small>
+        <div class="row2"><input class="in" inputmode="numeric" maxlength="6" placeholder="······"
+            autocomplete="off"><button class="act go knock">👀 Visit</button></div>
+      </div>
+      <div class="list"></div>
+      <button class="close">Close</button>
+    </div>
+  </div>
+  <div id="ask" hidden>
+    <div class="card">
+      <div class="title"></div>
+      <div class="msg"></div>
+      <div class="row2"><button class="no"></button><button class="yes"></button></div>
+    </div>
+  </div>
+  <div id="visitbar" hidden><span></span><button></button></div>
+  <div id="book" class="sheet" hidden>
+    <div class="card">
+      <h2>📖 Collection</h2>
+      <div class="sub"></div>
+      <div class="sets"></div>
+      <div class="fact">Tap a find to read about it.</div><button class="close">Close</button>
+    </div>
+  </div>
+  <div id="jobs" class="sheet" hidden>
+    <div class="card">
+      <h2>📋 Today's jobs</h2>
+      <div class="sub"></div>
+      <div class="list"></div><button class="close">Close</button>
+    </div>
+  </div>
+  <div id="find" hidden>
+    <div class="card">
+      <div class="big"></div>
+      <div class="title"></div>
+      <div class="tag"></div>
+      <div class="fact"></div><button>Yay!</button>
+    </div>
+  </div>
+  <div id="toybar" hidden></div>
+  <div id="paintbar" hidden>
+    <div class="sw"></div>
+    <div class="row"><span class="info"></span><button class="unlock" hidden></button><button
+        class="brush">Brush</button><button class="done">✓ Done</button></div>
+  </div>
+  <button id="arrange-done" hidden>✓ Done arranging</button>
+  <div id="hint"></div>
+  <div id="swipehint" hidden></div>
+  <div id="shop" hidden>
+    <div class="card">
+      <div class="head"><b>Shop</b><span id="shop-stars"></span><button id="shop-close">✕</button></div>
+      <div id="shop-list"></div>
+    </div>
+  </div>
+  <div id="menu" hidden>
+    <div class="card">
+      <div class="title"></div>
+      <div class="persona"></div>
+      <div class="age"></div>
+      <div class="mood"></div>
+      <div class="traits"></div>
+      <button id="m-rename">✏️ Rename</button>
+      <button id="m-vet" hidden>💊 Use vet kit</button>
+      <button id="m-move">🚚 Move to another yard</button>
+      <button id="m-gift" hidden>🎁 Give to a friend</button>
+      <button id="m-release">🌿 Release to the wild</button>
+      <button id="m-close" class="ghost">Cancel</button>
+    </div>
+  </div>
+  <div id="roster" hidden>
+    <div class="card">
+      <div class="title"></div>
+      <div class="list"></div>
+      <button class="close">Close</button>
+    </div>
+  </div>
+  <div id="namer" hidden>
+    <div class="card">
+      <div class="title"></div>
+      <input maxlength="14" autocomplete="off" enterkeyhint="done">
+      <div class="msg" hidden></div>
+      <button class="ok">OK</button>
+      <div class="row2" hidden><button class="no">Cancel</button><button class="yes danger">Yes</button></div>
+    </div>
+  </div>
+  <div id="away" hidden>
+    <div class="card">
+      <h2>Welcome back! 🐢</h2>
+      <div class="body"></div><button id="away-ok">Check on them</button>
+    </div>
+  </div>
+  <div id="tools">
+    <button data-mode="walk" class="on">👆<span>Call</span></button>
+    <button data-mode="food">🥬<span>Feed</span></button>
+    <button data-act="water">💧<span>Water</span></button>
+    <button data-mode="clean">🧹<span>Clean</span></button>
+    <button data-mode="play">🎾<span>Play</span></button>
+  </div>
+  <script type="module" src="js/game.js"></script>
+<script>
+(() => {
+  const wrap = document.getElementById('menu-wrap');
+  const toggle = document.getElementById('menu-pill');
+  const drawer = document.getElementById('pill-drawer');
+  const bookBtn = document.getElementById('book-btn');
+  const jobsBtn = document.getElementById('jobs-btn');
+  const friendsBtn = document.getElementById('friends-btn');
+  const bookBadge = drawer.querySelector('[data-for="book"]');
+  const jobsBadge = drawer.querySelector('[data-for="jobs"]');
+
+  function setOpen(open) {
+    drawer.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.textContent = open ? '✕ Close' : '☰ Menu';
+  }
+
+  function syncBadges() {
+    const bookMatch = bookBtn.textContent.match(/\d+/);
+    const jobsMatch = jobsBtn.textContent.match(/\d+\/\d+/);
+    if (bookMatch) bookBadge.textContent = bookMatch[0];
+
+    const hasAlert =
+      friendsBtn.classList.contains('ready') ||
+      friendsBtn.classList.contains('online');
+    toggle.classList.toggle('has-ready', hasAlert);
+  }
+
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setOpen(drawer.hidden);
+  });
+
+  drawer.addEventListener('click', (e) => {
+    if (e.target.closest('button')) setOpen(false);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!drawer.hidden && !wrap.contains(e.target)) setOpen(false);
+  });
+
+  const obs = new MutationObserver(syncBadges);
+  [friendsBtn].forEach((el) =>
+    obs.observe(el, { childList: true, characterData: true, subtree: true, attributes: true })
+  );
+  syncBadges();
+})();
+</script>
 </body>
+
 </html>
