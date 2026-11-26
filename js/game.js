@@ -396,7 +396,7 @@ function packYard() {
     name: yardName, t: Date.now(),
     turtles: turtles.filter(t => t.releasing === undefined).map(packTurtle), sel: Math.max(0, turtles.indexOf(sel)),
     poops, level: bowl.level,
-    foods: foods.map(({ x, y, type, bites, max, rot, fromFeeder, slot }) => ({ x, y, type, bites, max, rot, fromFeeder, slot })),
+    foods: foods.map(({ x, y, type, bites, max, rot, fromFeeder, slot, t }) => ({ x, y, type, bites, max, rot, fromFeeder, slot, t })),
     up: Object.fromEntries(Object.entries(up).filter(([k]) => !SHARED_UP.includes(k))),
     objs: objs.map(({ kind, type, seed, x, y }) => ({ kind, type, seed, x, y })), plots, ground,
     bowlPos: { x: bowl.x, y: bowl.y }, cam: { x: cam.x, y: cam.y, z: cam.z },
@@ -1440,9 +1440,20 @@ function drawBowl(time) {
   }
 }
 
+// Snacks you drop go off after a while: they fade over the last few seconds, then disappear (garden and feeder food don't).
+const FOOD_LIFE = 120e3, FOOD_FADE = 15e3;
+const foodLeft = (f, now = Date.now()) => (f.t ? FOOD_LIFE - (now - f.t) : Infinity);
+function spoilFood(now) {
+  for (const f of foods) if (!f.t && f.slot === undefined && !f.fromFeeder) f.t = now; // dropped before snacks went off: the clock starts now
+  const gone = foods.filter(f => foodLeft(f, now) <= 0 && !turtles.some(t => t.eat?.f === f)); // a turtle mid-bite gets to finish
+  if (!gone.length) return;
+  for (const f of gone) emit(f.x, f.y, 'crumb', 4);
+  foods = foods.filter(f => !gone.includes(f));
+}
 function drawFoodItem(f) {
   const c = ctx, s = 0.5 + 0.5 * f.bites / f.max;
   c.save(); c.translate(f.x, f.y); c.rotate(f.rot); c.scale(s, s);
+  c.globalAlpha = clamp(foodLeft(f) / FOOD_FADE, 0.25, 1);
   c.fillStyle = '#0002'; c.beginPath(); c.ellipse(3, 4, 16, 13, 0, 0, 7); c.fill();
   if (f.type === 'lettuce') {
     c.fillStyle = '#6cc04a'; c.strokeStyle = '#3f8a2a'; c.lineWidth = 2;
@@ -3210,7 +3221,7 @@ function tap(p) {
     if (foods.filter(f => f.slot === undefined).length >= 6) return say('That\'s plenty of food!');
     const type = foodType;
     const bites = type === 'berry' ? 2 : 3;
-    const f = { x: p.x, y: p.y, type, bites, max: bites, rot: rand(0, 6) }; keepInYard(f); foods.push(f); job('snack'); snd.play('drop');
+    const f = { x: p.x, y: p.y, type, bites, max: bites, rot: rand(0, 6), t: Date.now() }; keepInYard(f); foods.push(f); job('snack'); snd.play('drop');
     buzz(8);
   } else if (mode === 'clean') {
     const hit = poops.filter(q => dist(q, p) < Math.max(26, 30 / cam.z));
@@ -4089,7 +4100,7 @@ function frameBody(now) {
   poops.forEach(p => p.born += dt);
   marker = isPicked() ? sel.userTarget : null;
   const nowMs = Date.now(), dk = darkness();
-  if (!visit) { gardenTick(nowMs); lootTick(nowMs); jobTick(dt); updateCrabs(dt); }
+  if (!visit) { gardenTick(nowMs); lootTick(nowMs); jobTick(dt); spoilFood(nowMs); updateCrabs(dt); }
   hostTick(now);
   if (objOf('garden')) for (const f of foods) if (f.slot !== undefined) { const sp = slotPos(f.slot); f.x = sp.x; f.y = sp.y; }
   updateFlies(dt, dk, v);
