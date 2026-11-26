@@ -5,3 +5,5 @@ android/keystore.properties
 *.jks
 *.keystore
 *.aab
+.wrangler/
+server/.dev.vars

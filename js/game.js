@@ -411,7 +411,7 @@ function setYardState(y) { // put a packed yard into the globals (no layout yet:
   up = { ...JSON.parse(JSON.stringify(UP0)), ...(y.up || {}), ...shared }; up.size = { ...(up.size || {}) };
   objs = (y.objs || []).map(o => (o.kind === 'tree' ? { kind: 'deco', type: 'tree', seed: o.seed ?? Math.random(), x: o.x, y: o.y } : o));
   plots = y.plots || [];
-  ground = y.ground || {}; groundChanged();
+  if (!y.ground || y.ground !== ground) { ground = y.ground || {}; groundChanged(); } // same object = same tiles (visits resend the yard often)
   if (y.bowlPos) Object.assign(bowl, y.bowlPos); else if (base) { bowl.x = base.w - 60; bowl.y = 58; }
   if (y.cam) Object.assign(cam, y.cam);
 }
@@ -438,7 +438,7 @@ function rescaleToStandard() {
 let loadingBackup = false;
 function save() {
   if (loadingBackup) return; // a backup is being loaded: don't write the old game over it
-  yards[yardIdx] = packYard();
+  yards[yardIdx] = visit ? visit.home : packYard(); // visiting a friend: your own yard waits in visit.home
   localStorage.setItem(SAVE3, JSON.stringify({
     v: 3, yards, active: yardIdx, base, t: Date.now(),
     shared: { stars, lastDaily, loot, ...Object.fromEntries(SHARED_UP.map(k => [k, up[k]])) },
@@ -3037,7 +3037,7 @@ cv.addEventListener('pointerdown', e => {
     const o = movables().filter(o => dist(p, o) < hitR(o) + 10 / cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0];
     if (o) { gest = { kind: 'move', o, dx: o.x - p.x, dy: o.y - p.y, sx: e.clientX, sy: e.clientY, moved: false }; return; }
   }
-  if (mode === 'play' && ball && !placing && dist(p, ball) < ball.r + 22 / cam.z) {
+  if (!visit && mode === 'play' && ball && !placing && dist(p, ball) < ball.r + 22 / cam.z) {
     drag = { hist: [{ x: p.x, y: p.y, t: performance.now() }] }; ball.held = true; ball.idle = 0; ball.vx = ball.vy = 0;
     gest = { kind: 'ball' };
     return;
@@ -3070,7 +3070,7 @@ cv.addEventListener('pointermove', e => {
     swipeShow(e.clientX - gest.sx);
   } else if (gest.kind === 'maybe' || gest.kind === 'pan') {
     const dx = e.clientX - gest.sx, dy = e.clientY - gest.sy;
-    if (gest.kind === 'maybe' && atMinZoom() && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.3) { // fully zoomed out: a sideways swipe changes yard
+    if (gest.kind === 'maybe' && !visit && atMinZoom() && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.3) { // fully zoomed out: a sideways swipe changes yard
       gest.kind = 'yardswipe'; gest.t0 = performance.now(); swipeShow(dx); return;
     }
     if (gest.kind === 'maybe' && Math.hypot(dx, dy) > 10) gest.kind = 'pan';
@@ -3095,7 +3095,7 @@ function pointerEnd(e) {
       'Remove', () => { objs = objs.filter(x => x !== o); emit(o.x, o.y, 'sparkle', 6); save(); });
   }
   else if (gest?.kind === 'yardswipe') { if (e.type === 'pointerup') swipeEnd(e.clientX - gest.sx, performance.now() - gest.t0); else swipeCancel(); }
-  else if (gest?.kind === 'maybe' && e.type === 'pointerup') tap(s2w(e.clientX, e.clientY));
+  else if (gest?.kind === 'maybe' && e.type === 'pointerup') { if (visit) say('👀 Just visiting: look around, but no touching', 2000); else tap(s2w(e.clientX, e.clientY)); }
   if (gest?.kind === 'pinch' && ptrs.size) gest = { kind: 'done' }; // the finger left behind doesn't tap
   if (!ptrs.size) gest = null;
 }
@@ -3273,6 +3273,8 @@ stageEl.addEventListener('click', () => {
   }).join('');
   document.getElementById('m-release').disabled = turtles.length < 2;
   document.getElementById('m-move').hidden = yards.length < 2;
+  const gb = document.getElementById('m-gift');
+  gb.hidden = !RELAY_URL || !friends.length; gb.disabled = turtles.length < 2;
   const vb = document.getElementById('m-vet');
   vb.hidden = !up.vet; vb.textContent = `💊 Use vet kit (${up.vet} left)`;
   menu.hidden = false;
@@ -3468,6 +3470,378 @@ function separate() {
   }
 }
 
+// ---------- friends & visits (through the relay server: see server/README.md) ----------
+// The relay only passes messages between two games. The host says yes to every visit, a visitor can look but
+// not touch, and there is no chat: games only send yard snapshots, turtle moves and gift offers.
+// Friends are kept on this device only: a random device id plus the name you gave them.
+const RELAY_DEFAULT = ''; // after deploying the relay: 'wss://turtle-yard-relay.<your-subdomain>.workers.dev'
+const isLocalDev = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !isNativeApp;
+// local testing only: ?relay=ws://127.0.0.1:8787 (never on the real site, so a link can't point a game at another server)
+const RELAY_URL = (isLocalDev && (new URLSearchParams(location.search).get('relay') || localStorage.getItem('turtle-relay'))) || RELAY_DEFAULT;
+if (isLocalDev && new URLSearchParams(location.search).get('relay')) localStorage.setItem('turtle-relay', new URLSearchParams(location.search).get('relay'));
+const ID_KEY = 'turtle-device-id', FRIENDS_KEY = 'turtle-friends', MAX_FRIENDS = 40, MAX_GUESTS = 3, CODE_MIN = 10;
+function deviceId() { // random, made on this device, never tied to a person; not part of backups, so a restored game is a new device
+  let id = localStorage.getItem(ID_KEY);
+  if (!/^[A-Za-z0-9_-]{16,32}$/.test(id || '')) {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    id = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    localStorage.setItem(ID_KEY, id);
+  }
+  return id;
+}
+let friends = [];
+try { friends = (JSON.parse(localStorage.getItem(FRIENDS_KEY)) || []).filter(f => f && typeof f.id === 'string'); } catch { }
+const friendOf = id => friends.find(f => f.id === id);
+const friendName = id => friendOf(id)?.name || 'Your friend';
+function saveFriends() { localStorage.setItem(FRIENDS_KEY, JSON.stringify(friends)); netHello(); renderFriends(); renderFriendPill(); }
+function addFriend(id, name) {
+  const f = friendOf(id);
+  if (f) f.name = name; else friends = [...friends, { id, name, since: Date.now() }].slice(-MAX_FRIENDS);
+  saveFriends(); renderVisitBar();
+}
+
+// ----- connection -----
+const net = { ws: null, up: false, tries: 0, timer: 0, online: new Set(), code: null, codeExp: 0, guests: new Set(), knocking: null, gift: null };
+let visit = null; // looking at a friend's yard: { host, pending, t0, home (your packed yard), picked, yi, groundStr }
+const friendsEl = document.getElementById('friends'), friendsBtn = document.getElementById('friends-btn');
+const netWanted = () => !!RELAY_URL && !document.hidden && (friends.length > 0 || !friendsEl.hidden || !!net.code || net.guests.size > 0 || !!visit || !!net.knocking);
+function netStart() {
+  if (!netWanted() || net.ws) return;
+  clearTimeout(net.timer);
+  let ws;
+  try { ws = new WebSocket(`${RELAY_URL}/ws?id=${deviceId()}`); } catch { return netRetry(); }
+  net.ws = ws;
+  ws.onopen = () => { if (net.ws !== ws) return; net.up = true; net.tries = 0; netHello(); renderFriends(); };
+  ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } netOn(m); };
+  ws.onclose = () => {
+    if (net.ws !== ws) return;
+    net.ws = null; net.up = false; net.online.clear(); net.code = null; net.knocking = null; net.gift = null;
+    if (net.guests.size) { net.guests.clear(); say('👋 Your visitors had to go (the connection dropped)', 3000); }
+    if (visit) goHome('📶 The connection dropped, so you came home');
+    renderFriends(); renderVisitBar(); renderFriendPill();
+    netRetry();
+  };
+}
+function netRetry() { clearTimeout(net.timer); if (netWanted()) net.timer = setTimeout(netStart, Math.min(30e3, 1000 * 2 ** net.tries++)); }
+function netStop() { clearTimeout(net.timer); net.ws?.close(); }
+const netSend = m => { if (!net.up) return false; net.ws.send(JSON.stringify(m)); return true; };
+const relay = (to, data) => netSend({ t: 'relay', to, data });
+const netHello = () => netSend({ t: 'hello', friends: friends.map(f => f.id) });
+
+function netOn(m) {
+  switch (m.t) {
+    case 'online': net.online = new Set(m.ids || []); renderFriends(); renderFriendPill(); break;
+    case 'code': net.code = m.code; net.codeExp = Date.now() + CODE_MIN * 60e3; renderFriends(); break;
+    case 'knock': onKnock(m.from, m.byCode); break;
+    case 'knock-fail': {
+      const k = net.knocking; net.knocking = null; renderFriends();
+      say(m.why === 'slow down' ? '🐢 Slow down! Wait a minute, then try again' : m.why === 'no such code' ? "🔑 That code didn't work. Check it with your friend" : `${k?.id ? friendName(k.id) : 'Your friend'} isn't online right now`, 3500);
+      break;
+    }
+    case 'answer': onAnswer(m.from, m.yes); break;
+    case 'left': onLeft(m.from); break;
+    case 'relay': if (m.data && typeof m.data === 'object') onRelay(m.from, m.data); break;
+    case 'relay-fail': if (net.gift?.to === m.to) { net.gift = null; say(`${friendName(m.to)} isn't online right now`, 3000); } break;
+  }
+}
+
+// ----- yes/no questions from the network (a queue, so two knocks don't trip over each other) -----
+const askEl = document.getElementById('ask'), askQ = [];
+function askNet(title, msg, yes, no, onYes, onNo) { askQ.push({ title, msg, yes, no, onYes, onNo }); if (askEl.hidden) showAsk(); snd.play('click'); buzz(40); }
+function showAsk() {
+  const a = askQ[0]; if (!a) return;
+  askEl.querySelector('.title').textContent = a.title; askEl.querySelector('.msg').textContent = a.msg;
+  askEl.querySelector('.yes').textContent = a.yes; askEl.querySelector('.no').textContent = a.no;
+  askEl.hidden = false;
+}
+const askDone = yes => { const a = askQ.shift(); askEl.hidden = true; (yes ? a?.onYes : a?.onNo)?.(); showAsk(); };
+askEl.querySelector('.yes').onclick = () => askDone(true);
+askEl.querySelector('.no').onclick = () => askDone(false);
+
+// ----- hosting: friends looking at your yard -----
+function onKnock(from, byCode) {
+  const f = friendOf(from), no = () => netSend({ t: 'answer', to: from, yes: false });
+  if (net.guests.has(from)) return netSend({ t: 'answer', to: from, yes: true });
+  if (visit || net.guests.size >= MAX_GUESTS || (!f && !byCode)) return no();
+  askNet(f ? `🔔 ${f.name} wants to visit!` : '🔔 Someone used your visit code!',
+    f ? `They'd like to look around ${yardName}. They can't change anything.` : `Only let them in if you know who it is. They can look around ${yardName}, but can't change anything.`,
+    'Let them in', 'Not now', () => {
+      if (visit || net.guests.size >= MAX_GUESTS) return no();
+      if (!netSend({ t: 'answer', to: from, yes: true })) return;
+      net.guests.add(from); hostSnapNow = true;
+      if (!f) { netSend({ t: 'close' }); net.code = null; } // a code lets one visitor in
+      renderVisitBar(); renderFriends(); snd.play('job');
+      if (!f) askName('Who is visiting? 👫', 'Friend', n => addFriend(from, n), 16);
+      else say(`👀 ${f.name} is visiting!`, 2500);
+    }, no);
+}
+function endHosting() {
+  for (const g of net.guests) netSend({ t: 'leave', to: g });
+  net.guests.clear(); renderVisitBar(); renderFriends();
+}
+const r2 = v => Math.round((v || 0) * 100) / 100;
+const poseOf = t => [Math.round(t.x), Math.round(t.y), r2(t.a), Math.round(t.v), r2(t.headExt), t.rest?.kind || 0, t.eat ? r2(t.eat.t) : -1,
+  r2(t.yawn), r2(t.petT), r2(t.drinkT), t.swim ? 1 : 0, r2(t.mud), t.lookAt ? Math.round(t.lookAt.x) : null, t.lookAt ? Math.round(t.lookAt.y) : null];
+let hostSnapNow = false, hostSnapT = 0, hostPoseT = 0, hostSending = false, hostYard = -1, hostCount = -1;
+function hostTick(now) { // called every frame: the yard every few seconds (and when it changes), turtle moves 4 times a second
+  if (!net.guests.size || !net.up || visit) return;
+  const live = turtles.filter(t => t.releasing === undefined);
+  if (yardIdx !== hostYard || live.length !== hostCount) hostSnapNow = true;
+  if ((hostSnapNow || now - hostSnapT > 4000) && !hostSending) {
+    hostSnapNow = false; hostSnapT = now; hostYard = yardIdx; hostCount = live.length; hostSending = true;
+    const y = packYard(), yi = yardIdx; delete y.cam;
+    gzipB64(JSON.stringify(y)).then(z => { for (const g of net.guests) relay(g, { k: 'snap', z, y: yi }); }).catch(() => { }).finally(() => { hostSending = false; });
+  }
+  if (now - hostPoseT > 250 && hostYard === yardIdx) {
+    hostPoseT = now;
+    const p = live.map(poseOf);
+    for (const g of net.guests) relay(g, { k: 'pose', p, y: yardIdx });
+  }
+}
+
+// ----- visiting: looking at a friend's yard -----
+function knock(target) { // { code } or { id }
+  if (!net.up || visit) return;
+  net.knocking = { ...target };
+  const k = net.knocking;
+  netSend({ t: 'knock', ...(target.code ? { code: target.code } : { to: target.id }) });
+  say('🔔 Knocking… waiting for your friend to say yes', 5000);
+  renderFriends();
+  setTimeout(() => { if (net.knocking === k) { net.knocking = null; renderFriends(); say('No answer. Maybe they are busy?', 3000); } }, 60e3);
+}
+function onAnswer(from, yes) {
+  const k = net.knocking;
+  if (!k || (k.id && k.id !== from)) return;
+  net.knocking = null; renderFriends();
+  if (!yes) return say(`${k.id ? friendName(from) : 'Your friend'} said not right now`, 3000);
+  visit = { host: from, pending: true };
+  say('🚪 Opening the gate…', 3000);
+  setTimeout(() => { if (visit?.pending && visit.host === from) { visit = null; netSend({ t: 'leave', to: from }); say("Couldn't load your friend's yard. Try again?", 3000); } }, 10e3);
+}
+function onLeft(from) {
+  if (visit?.host === from) return goHome(visit.pending ? null : `👋 ${friendName(from)} ended the visit`);
+  if (net.guests.delete(from)) { say(`👋 ${friendName(from)} went home`, 2500); renderVisitBar(); renderFriends(); }
+}
+function onRelay(from, d) {
+  if (d.k === 'snap' && visit?.host === from && typeof d.z === 'string') return onSnap(d);
+  if (d.k === 'pose' && visit?.host === from && !visit.pending) return onPose(d);
+  if (d.k === 'gift') return onGiftOffer(from, d);
+  if (d.k === 'gift-yes' || d.k === 'gift-no') return onGiftReply(from, d);
+}
+async function onSnap(d) {
+  let y;
+  try { y = JSON.parse(await gunzipB64(d.z)); } catch { return; }
+  if (!visit || !y || !Array.isArray(y.turtles) || !y.turtles.length) return;
+  if (visit.pending) startVisit(y, d.y); else applyVisitSnap(y, d.y, false);
+}
+const okObj = o => o && Number.isFinite(o.x) && Number.isFinite(o.y)
+  && (o.kind === 'deco' ? !!DECOS[o.type] : !!(STRUCTS[o.kind] || ROCKS[o.kind] || WILD[o.kind] || AUTO[o.kind] || o.kind === 'feeder'));
+function cleanTurtle(p) { // only the saved fields, with sane values
+  const o = Object.fromEntries(KEEP.filter(k => p[k] !== undefined && k !== 'x' && k !== 'y').map(k => [k, p[k]]));
+  o.name = String(o.name || 'Turtle').slice(0, 14);
+  o.growth = clamp(+o.growth || 0, 0, 1);
+  if (typeof o.st !== 'object' || !o.st) delete o.st;
+  if (!Array.isArray(o.gut)) o.gut = [];
+  if (typeof o.morph !== 'object' || !o.morph) o.morph = {};
+  return o;
+}
+function startVisit(y, yi) {
+  for (const el of document.querySelectorAll('.sheet, #menu, #roster, #shop')) el.hidden = true;
+  endHosting(); endArrange(); endPaint();
+  save();
+  visit = { host: visit.host, pending: false, t0: Date.now(), home: packYard(), picked, yi, groundStr: '' };
+  picked = false;
+  document.body.classList.add('visiting');
+  applyVisitSnap(y, yi, true);
+  renderVisitBar();
+  snd.play('hatch');
+  const host = visit.host;
+  if (!friendOf(host)) askName('Whose yard is this? 👫', 'Friend', n => addFriend(host, n), 16);
+  else say(`👀 Welcome to ${friendName(host)}'s yard!`, 2500);
+}
+function applyVisitSnap(y, yi, first) {
+  const sameYard = !first && yi === visit.yi, old = turtles;
+  visit.yi = yi;
+  const gs = JSON.stringify(y.ground || {});
+  const g = gs === visit.groundStr ? ground : (y.ground && typeof y.ground === 'object' ? y.ground : {});
+  visit.groundStr = gs;
+  const u = y.up && typeof y.up === 'object' ? { ...y.up } : {};
+  u.yard = clamp(u.yard | 0, 0, YARDS.length - 1); u.bowl = clamp(u.bowl | 0, 0, BOWLS.length - 1); u.feeder = clamp(u.feeder | 0, 0, FEEDERS.length - 1);
+  setYardState({
+    name: String(y.name || 'Yard').slice(0, 24), poops: Array.isArray(y.poops) ? y.poops : [], level: y.level, foods: Array.isArray(y.foods) ? y.foods : [],
+    turtles: y.turtles.slice(0, MAX_TURTLES).map(p => ({ ...cleanTurtle(p), x: +p.x || 0, y: +p.y || 0, a: +p.a || 0 })), sel: 0,
+    up: u, objs: (Array.isArray(y.objs) ? y.objs : []).filter(okObj), plots: Array.isArray(y.plots) ? y.plots : [], ground: g, bowlPos: y.bowlPos && { x: +y.bowlPos.x || 0, y: +y.bowlPos.y || 0 },
+  });
+  if (sameYard) { // keep the turtles we're already animating; just refresh how they look and feel
+    turtles = turtles.map((t, i) => {
+      const o = old[i];
+      if (!o || o.name !== t.name) return t;
+      for (const k of ['st', 'growth', 'chub', 'morph', 'tint', 'traits', 'S']) o[k] = t[k];
+      return o;
+    });
+  } else resetYardRuntime();
+  applyYard();
+  if (!sameYard) { cam.z = zMin(); cam.x = YW / 2; cam.y = YH / 2; clampCam(); }
+  for (const t of turtles) if (!t.feet.length) { use(t); resetFeet(); }
+  sel = turtles[0]; use(sel);
+}
+function onPose(d) {
+  if (d.y !== visit.yi || !Array.isArray(d.p) || d.p.length !== turtles.length) return;
+  d.p.forEach((p, i) => { if (Array.isArray(p)) turtles[i].net = p; });
+}
+function visitStep(t, dt) { // glide toward where the host's game says the turtle is
+  const p = t.net; if (!p) return;
+  const k = Math.min(1, dt * 6);
+  t.x += ((+p[0] || 0) - t.x) * k; t.y += ((+p[1] || 0) - t.y) * k; t.a += angDiff(t.a, +p[2] || 0) * k;
+  t.v = +p[3] || 0; t.headExt = lerp(t.headExt, +p[4] || 0, k);
+  t.rest = p[5] ? { kind: String(p[5]) } : null;
+  if (p[6] >= 0) { if (!t.eat || t.netEat !== p[6]) { t.eat = { t: +p[6] }; t.netEat = p[6]; } else t.eat.t += dt; } else t.eat = null;
+  t.yawn = +p[7] || 0; t.petT = +p[8] || 0; t.drinkT = +p[9] || 0; t.swim = !!p[10]; t.mud = +p[11] || 0;
+  t.lookAt = p[12] == null ? null : { x: +p[12], y: +p[13] };
+  t.blinkT -= dt; if (t.blinkT <= 0) { t.blink = 0.15; t.blinkT = rand(2, 5); }
+  t.blink = Math.max(0, t.blink - dt);
+  t.tailT += dt * (2 + t.v * 0.12);
+}
+function goHome(msg) {
+  if (!visit) return;
+  const v = visit; visit = null;
+  if (net.up) netSend({ t: 'leave', to: v.host });
+  if (v.pending) { if (msg) say(msg, 3000); return; }
+  document.body.classList.remove('visiting');
+  setYardState(v.home); resetYardRuntime(); applyYard(); clampCam(); syncCrabs(); ensurePlots();
+  for (const t of turtles) { use(t); resetFeet(); }
+  picked = v.picked; use(sel);
+  graceT = GRACE_SECS;
+  renderVisitBar();
+  const secs = (Date.now() - v.t0) / 1000;
+  if (secs > 90) showAway(simulateAway(secs), yardName); // your turtles kept living while you were out
+  save(); renderPills();
+  say(msg || `🏡 Back home in ${yardName}`, 2500);
+}
+const visitBar = document.getElementById('visitbar');
+function renderVisitBar() {
+  const b = visitBar.querySelector('button');
+  visitBar.classList.toggle('host', !visit && net.guests.size > 0);
+  if (visit && !visit.pending) {
+    visitBar.querySelector('span').textContent = `👀 ${friendName(visit.host)}'s yard: ${yardName}`;
+    b.textContent = '🏠 Go home'; b.onclick = () => goHome();
+  } else if (net.guests.size) {
+    const names = [...net.guests].map(friendName);
+    visitBar.querySelector('span').textContent = `👀 ${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} visiting`;
+    b.textContent = 'End visit'; b.onclick = endHosting;
+  } else { visitBar.hidden = true; return; }
+  visitBar.hidden = false;
+}
+
+// ----- gifts: a turtle moves to a friend's yard (both games must say yes) -----
+let giftTurtle = null;
+function sendGift(to) {
+  const t = giftTurtle; giftTurtle = null; friendsEl.hidden = true;
+  if (!t || !turtles.includes(t)) return;
+  if (turtles.length < 2) return say("You can't give away your only turtle", 3000);
+  net.gift = { to, t, id: Math.random().toString(36).slice(2) };
+  relay(to, { k: 'gift', id: net.gift.id, turtle: packTurtle(t) });
+  say(`🎁 Waiting for ${friendName(to)} to say yes to ${t.name}…`, 4000);
+}
+function onGiftOffer(from, d) {
+  if (!d.turtle || typeof d.turtle !== 'object') return;
+  const p = cleanTurtle(d.turtle), mi = morphInfo(p);
+  askNet(`🎁 ${friendName(from)} has a gift for you!`, `Would you like to adopt ${p.name}${mi.label ? `, ${mi.label.toLowerCase()}` : ''}? They'll come to live in your yard.`,
+    'Adopt', 'No thanks', () => acceptGift(from, d.id, p), () => relay(from, { k: 'gift-no', id: d.id }));
+}
+function acceptGift(from, id, p) {
+  const home = visit && !visit.pending ? visit.home : null; // visiting? the turtle waits in your own yard
+  const list = home ? home.turtles : turtles.filter(t => t.releasing === undefined);
+  const fits = Math.min(MAX_TURTLES, YARDS[(home ? home.up : up)?.yard || 0].fits);
+  if (list.length >= fits) { relay(from, { k: 'gift-no', id, full: true }); return say(`🏡 Your yard is full, so ${p.name} couldn't come. Make room and ask again`, 4000); }
+  if (!relay(from, { k: 'gift-yes', id })) return say(`📶 Couldn't reach ${friendName(from)}. Try again?`, 3000);
+  p.arrived = Date.now();
+  if (home) {
+    const m = YARDS[home.up?.yard || 0].m;
+    home.turtles.push({ ...p, x: base.w * m / 2 + rand(-40, 40), y: base.h * m / 2 + rand(-40, 40), a: rand(-3, 3) });
+  } else {
+    const t = makeTurtle({ ...p, x: cam.x + rand(-30, 30), y: cam.y + rand(-30, 30), a: rand(-3, 3) });
+    keepInYard(t); turtles.push(t); use(t); resetFeet(); use(sel);
+    emit(t.x, t.y, 'sparkle', 20);
+  }
+  save(); renderPills();
+  snd.play('fanfare'); say(`🎁 ${p.name} joined your yard${home ? ' (waiting for you at home)' : ''}! Thank you, ${friendName(from)}!`, 4000);
+}
+function onGiftReply(from, d) {
+  const g = net.gift;
+  if (!g || g.to !== from || g.id !== d.id) return;
+  net.gift = null;
+  if (d.k === 'gift-no') return say(d.full ? `🏡 ${friendName(from)}'s yard is full` : `${friendName(from)} said no thanks`, 3000);
+  const t = g.t;
+  if (turtles.includes(t) && turtles.length > 1) {
+    emit(t.x, t.y, 'sparkle', 16);
+    turtles = turtles.filter(x => x !== t);
+    if (sel === t) sel = turtles[0];
+    use(sel); save();
+  }
+  snd.play('job'); say(`🎁 ${t.name} went to live with ${friendName(from)}! 💚`, 4000);
+}
+
+// ----- the friends sheet -----
+function openFriends(gift = null) {
+  if (!RELAY_URL) return say("👫 Friends aren't switched on in this version yet", 3000);
+  if (visit) return;
+  giftTurtle = gift;
+  friendsEl.hidden = false;
+  netStart(); renderFriends();
+}
+function renderFriends() {
+  if (friendsEl.hidden) return;
+  if (net.code && Date.now() > net.codeExp) net.code = null;
+  friendsEl.querySelector('.sub').textContent = !net.up ? '📶 Connecting to the turtle post office…'
+    : giftTurtle ? `🎁 Pick a friend to give ${giftTurtle.name} to. They need to be online.` : "Visit each other's yards and give turtles as gifts";
+  friendsEl.querySelectorAll('.grp').forEach(g => { g.hidden = !!giftTurtle; });
+  const codeEl = friendsEl.querySelector('.code'), openB = friendsEl.querySelector('.open');
+  codeEl.hidden = !net.code;
+  if (net.code) codeEl.textContent = net.code.replace(/^(\d{3})/, '$1 ');
+  openB.textContent = net.code ? `✖ Stop (the code works ${Math.ceil((net.codeExp - Date.now()) / 60e3)} more min)` : '🔑 Get a visit code';
+  openB.classList.toggle('go', !net.code);
+  openB.disabled = !net.up;
+  friendsEl.querySelector('.knock').disabled = !net.up || !!net.knocking;
+  const list = [...friends].sort((a, b) => net.online.has(b.id) - net.online.has(a.id));
+  friendsEl.querySelector('.list').innerHTML = list.length ? list.map(f => {
+    const on = net.online.has(f.id), here = net.guests.has(f.id);
+    const act = giftTurtle ? `<button class="act go give" ${on ? '' : 'disabled'}>🎁 Give</button>` : `<button class="act go visit" ${on && net.up && !net.knocking ? '' : 'disabled'}>👀 Visit</button>`;
+    return `<div class="fr" data-id="${esc(f.id)}"><i class="dot ${on ? 'on' : ''}"></i><button class="nm">${esc(f.name)}<small>${here ? 'Visiting you now' : on ? 'Online now' : 'Not online'}</small></button>${act}<button class="x" aria-label="Remove">✕</button></div>`;
+  }).join('') : '<div class="empty">No friends yet. Swap visit codes to add one!</div>';
+}
+setInterval(renderFriends, 15e3); // code countdown
+const renderFriendPill = () => { friendsBtn.textContent = net.online.size ? `👫 ${net.online.size}` : '👫'; friendsBtn.classList.toggle('ready', net.online.size > 0); };
+friendsBtn.onclick = () => openFriends();
+friendsEl.querySelector('.open').onclick = () => {
+  if (net.code) { netSend({ t: 'close' }); net.code = null; renderFriends(); }
+  else netSend({ t: 'open' });
+};
+friendsEl.querySelector('.in').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); });
+friendsEl.querySelector('.in').addEventListener('keydown', e => { if (e.key === 'Enter') friendsEl.querySelector('.knock').click(); });
+friendsEl.querySelector('.knock').onclick = () => {
+  const inp = friendsEl.querySelector('.in'), code = inp.value.replace(/\D/g, '');
+  if (code.length !== 6) return say('🔑 Visit codes have 6 numbers', 2500);
+  if (code === net.code) return say("🔑 That's your own code! Give it to a friend", 3000);
+  inp.value = ''; knock({ code });
+};
+friendsEl.querySelector('.list').addEventListener('click', e => {
+  const row = e.target.closest('.fr'); if (!row) return;
+  const f = friendOf(row.dataset.id); if (!f) return;
+  if (e.target.closest('.visit')) return knock({ id: f.id });
+  if (e.target.closest('.give')) return sendGift(f.id);
+  if (e.target.closest('.nm')) return askName('Rename your friend', f.name, n => { f.name = n; saveFriends(); renderVisitBar(); }, 16);
+  if (e.target.closest('.x')) return askConfirm(`Remove ${f.name}?`, 'You can add them again any time with a visit code.', 'Remove', () => {
+    if (net.guests.has(f.id)) { netSend({ t: 'leave', to: f.id }); net.guests.delete(f.id); renderVisitBar(); }
+    friends = friends.filter(x => x !== f); saveFriends();
+  });
+});
+friendsEl.querySelector('.close').onclick = () => { friendsEl.hidden = true; giftTurtle = null; };
+friendsEl.addEventListener('click', e => { if (e.target === friendsEl) { friendsEl.hidden = true; giftTurtle = null; } });
+document.getElementById('m-gift').onclick = () => { menu.hidden = true; if (turtles.length > 1) openFriends(sel); };
+if (!RELAY_URL) friendsBtn.hidden = true;
+netStart(); // only connects if you already have friends (so they can see you're online)
+
 let last = performance.now();
 // Slow device? Draw fewer pixels. Every 2 seconds, if most frames missed ~40fps, step the canvas resolution down (never below 1×).
 const perf = { n: 0, slow: 0, sum: 0, fps: 0 };
@@ -3482,6 +3856,13 @@ function adaptRes(gap) {
 window.__perf = perf;
 
 function frame(now) {
+  try { frameBody(now); } catch (e) {
+    if (!visit) throw e;
+    console.error(e); ctx.reset?.(); goHome("⚠️ Couldn't show your friend's yard, so you came home");
+    requestAnimationFrame(frame);
+  }
+}
+function frameBody(now) {
   adaptRes(now - last);
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   const time = now / 1000;
@@ -3494,10 +3875,11 @@ function frame(now) {
     const vis = inView(t, t.S * 3, v);
     if (vis && t.off) resetFeet();
     t.off = !vis;
-    if (!t.dying) { think(dt); updateStats(dt); }
+    if (visit) visitStep(t, dt); // a friend's turtle: its game moves it, we just follow
+    else if (!t.dying) { think(dt); updateStats(dt); }
     if (vis) updateFeet(dt);
   }
-  if (turtles.some(t => t.releasing !== undefined && (t.releasing -= dt) <= 0)) {
+  if (!visit && turtles.some(t => t.releasing !== undefined && (t.releasing -= dt) <= 0)) {
     turtles = turtles.filter(t => !(t.releasing <= 0));
     if (!turtles.length) { // the yard is never empty: a new hatchling wanders in
       const t = makeTurtle({ name: randomName(), growth: 0, x: cam.x, y: cam.y, morph: rollMorph() });
@@ -3507,12 +3889,12 @@ function frame(now) {
     if (!turtles.includes(sel)) sel = turtles[0];
     save();
   }
-  separate();
+  if (!visit) separate();
   updateBall(dt);
   bowl.fill = Math.max(0, bowl.fill - dt);
   if (BOWLS[up.bowl].refill) bowl.level = Math.min(1, bowl.level + dt * BOWLS[up.bowl].refill / 600); // fountain tops itself up
   const feeder = up.feeder && objOf('feeder');
-  if (feeder) {
+  if (feeder && !visit) {
     const F = FEEDERS[up.feeder];
     if ((feederT += dt) > F.every) {
       feederT = 0;
@@ -3524,10 +3906,9 @@ function frame(now) {
   poops.forEach(p => p.born += dt);
   marker = isPicked() ? sel.userTarget : null;
   const nowMs = Date.now(), dk = darkness();
-  gardenTick(nowMs);
-  lootTick(nowMs);
+  if (!visit) { gardenTick(nowMs); lootTick(nowMs); updateCrabs(dt); }
+  hostTick(now);
   if (objOf('garden')) for (const f of foods) if (f.slot !== undefined) { const sp = slotPos(f.slot); f.x = sp.x; f.y = sp.y; }
-  updateCrabs(dt);
   updateFlies(dt, dk, v);
   updateLife(dt, dk);
   { const pond = objOf('pond'); snd.ambience(dk, !!pond && inView(pond, POND.rx, v)); }
@@ -3553,7 +3934,7 @@ function frame(now) {
   for (const o of objs) if (o.kind === 'deco' && !DECOS[o.type].tall && !DECOS[o.type].canopy && inView(o, 40, v)) drawDeco(o, time, dk);
   for (const p of poops) if (inView(p, 30, v)) drawPoop(p, time);
   for (const f of foods) if (inView(f, 30, v)) drawFoodItem(f);
-  drawLoot(time, v);
+  if (!visit) drawLoot(time, v); // your finds aren't in your friend's yard
   if (inView(bowl, bowl.r + 10, v)) drawBowl(time); // low to the ground: turtles always walk over it
   drawMarker(time);
   // turtles, crabs, toy, bowl, feeder, mirror and tall decorations back-to-front so overlaps look right
@@ -3623,8 +4004,8 @@ addEventListener('pagehide', save);
 // Switching away from the app counts as being away: simulate that time when you come back.
 let hiddenAt = null;
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { hiddenAt = Date.now(); save(); snd.pause(); return; }
-  snd.resume();
+  if (document.hidden) { if (visit) goHome(); hiddenAt = Date.now(); save(); snd.pause(); netStop(); return; }
+  snd.resume(); netStart();
   if (hiddenAt === null) return;
   const away = (Date.now() - hiddenAt) / 1000;
   hiddenAt = null; last = performance.now();

@@ -55,7 +55,7 @@ A mystery gift and three little jobs wait for you each day. Miss a day? No probl
 • No ads
 • No in-app purchases
 • No accounts or sign-ins
-• No data collected: everything stays on your device
+• Your game stays on your device. Visit friends' yards only when they say yes, with no chat
 • Turtles can't die while you're away
 
 Gentle sounds, cozy day and night, and a yard that keeps growing with you. Start your turtle family today!
@@ -65,10 +65,14 @@ Gentle sounds, cozy day and night, and a yard that keeps growing with you. Start
 - **Privacy policy**: https://madgetr.github.io/turtles/privacy.html
 - **Ads**: No, the app does not contain ads.
 - **App access**: All functionality is available without special access.
-- **Content rating** (IARC questionnaire): category *Game*. Answer **No** to violence, fear, sexuality, language, controlled substances, gambling and user interaction/communication. Expected rating: Everyone / PEGI 3.
+- **Content rating** (IARC questionnaire): category *Game*. Answer **No** to violence, fear, sexuality, language, controlled substances and gambling. Once the Friends feature is switched on (relay deployed), answer **Yes** to users interacting / sharing content: players can see each other's yards and turtle names. There is no chat. Expected rating: Everyone / PEGI 3, with a "Users Interact" notice.
   - One honest note: a turtle can die if it's badly neglected while the game is open (a sad message, no gore). This is mild and fits "Everyone".
 - **Target audience and content**: select age groups **5 and under, 6–8, 9–12** (and 13+ if you want teens/adults too). Choosing under-13 groups puts the app in the Families program, which the game already meets.
-- **Data safety**: *Does your app collect or share any of the required user data types?* → **No**. (No data leaves the device; nothing to declare.) Data is not encrypted in transit because none is transmitted; no account deletion needed (no accounts).
+- **Data safety** (before the Friends feature is switched on): *Does your app collect or share any of the required user data types?* → **No**.
+- **Data safety** (once the Friends relay is live; check these answers yourself against Google's current form):
+  - Collects data: **Yes**. **Device or other IDs** (the random device code) and **Other user-generated content** (yard and turtle names in a visit or gift).
+  - For each: collected, **not shared** (transfers a player starts to another player don't count as sharing), **processed ephemerally**, **optional** (only if you use Friends), purpose **App functionality**.
+  - Encrypted in transit: **Yes** (wss://). Users can request deletion: nothing is stored, so not applicable. No accounts.
 - **Government apps / financial features / health**: No.
 - **News app**: No.
 

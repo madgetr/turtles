@@ -1,0 +1,16 @@
+# Turtle Yard relay (Cloudflare Worker + one Durable Object). Deploy steps: see README.md.
+name = "turtle-yard-relay"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+# Pages that may connect: the GitHub Pages site, the Android app's webview, and the local dev server.
+ALLOWED_ORIGINS = "https://madgetr.github.io,https://localhost,http://localhost:5200,http://127.0.0.1:5200"
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "Hub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Hub"]
