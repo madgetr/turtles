@@ -3357,11 +3357,12 @@ function askConfirm(title, msg, yesLabel, onYes) {
   namer.querySelector('.title').textContent = title;
   namer.querySelector('.msg').textContent = msg;
   namer.querySelector('.yes').textContent = yesLabel;
-  confirmYes = onYes; namerDone = null;
+  confirmYes = onYes; confirmNo = null; namerDone = null;
   namer.hidden = false;
 }
-namer.querySelector('.no').onclick = () => { namer.hidden = true; confirmYes = null; };
-namer.querySelector('.yes').onclick = () => { namer.hidden = true; const f = confirmYes; confirmYes = null; f?.(); };
+let confirmNo = null; // set right after askConfirm for a "no" action
+namer.querySelector('.no').onclick = () => { namer.hidden = true; confirmYes = null; const f = confirmNo; confirmNo = null; f?.(); };
+namer.querySelector('.yes').onclick = () => { namer.hidden = true; const f = confirmYes; confirmYes = null; confirmNo = null; f?.(); };
 namerIn.addEventListener('keydown', e => { if (e.key === 'Enter') closeNamer(true); });
 document.getElementById('away-ok').onclick = () => { document.getElementById('away').hidden = true; };
 
@@ -3599,14 +3600,20 @@ function deviceId() { // random, made on this device, never tied to a person; no
   return id;
 }
 let friends = [];
-try { friends = (JSON.parse(localStorage.getItem(FRIENDS_KEY)) || []).filter(f => f && typeof f.id === 'string'); } catch { }
+try { friends = (JSON.parse(localStorage.getItem(FRIENDS_KEY)) || []).filter((f, i, all) => f && typeof f.id === 'string' && all.findIndex(g => g?.id === f.id) === i); } catch { }
 const friendOf = id => friends.find(f => f.id === id);
 const friendName = id => friendOf(id)?.name || 'Your friend';
 function saveFriends() { localStorage.setItem(FRIENDS_KEY, JSON.stringify(friends)); netHello(); renderFriends(); renderFriendPill(); }
 function addFriend(id, name) {
   const f = friendOf(id);
-  if (f) f.name = name; else friends = [...friends, { id, name, since: Date.now() }].slice(-MAX_FRIENDS);
-  saveFriends(); renderVisitBar();
+  if (f) { f.name = name; saveFriends(); renderVisitBar(); return; }
+  const twin = friends.find(x => x.name.trim().toLowerCase() === name.trim().toLowerCase()); // same name, different game (new phone, app vs web)?
+  const add = (n) => { friends = [...friends, { id, name: n, since: Date.now() }].slice(-MAX_FRIENDS); saveFriends(); renderVisitBar(); };
+  if (!twin) return add(name);
+  askConfirm(`Is this the same ${twin.name}?`, `You already have a friend called ${twin.name}. If it's the same person on a new phone or game, they'll be replaced. If not, you'll have two.`, 'Same friend', () => {
+    twin.id = id; twin.since = Date.now(); delete twin.sent; friends = friends.filter((x, i, all) => all.findIndex(y => y.id === x.id) === i); saveFriends(); renderVisitBar();
+  });
+  confirmNo = () => { let n = 2; while (friends.some(x => x.name.toLowerCase() === `${name} ${n}`.toLowerCase())) n++; add(`${name} ${n}`); };
 }
 
 // ----- connection -----
