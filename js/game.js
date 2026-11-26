@@ -482,19 +482,19 @@ function load() {
 // ---------- life goes on while the game is closed ----------
 // Rates while away (per second). Turtles drink
 // from the bowl / eats leftover food by itself. Run out of both and health starts dropping.
-const AWAY_FLOOR = 25;
-const AWAY = { // tuned so a fed + watered turtle is hungry but fine after a day; ~2 days of neglect makes it sick
-  hunger: 100 / (22 * 3600), thirst: 100 / (16 * 3600), happy: 100 / (30 * 3600), dirty: 100 / (72 * 3600),
-  hurt: 100 / (18 * 3600), filth: 100 / (36 * 3600), heal: 100 / (8 * 3600), // full recovery takes ~8 h away
+const AWAY_FLOOR = 15;
+const AWAY = { // tuned for a ~7-8 h school day (fine, just hungry/thirsty), while skipping a full 24 h hurts health
+  hunger: 100 / (12 * 3600), thirst: 100 / (9 * 3600), happy: 100 / (16 * 3600), dirty: 100 / (36 * 3600),
+  hurt: 100 / (12 * 3600), filth: 100 / (22 * 3600), heal: 100 / (10 * 3600), // full recovery takes ~10 h away
 };
 function healthStep(t, dt, r) {
   const s = t.st;
   let d = 0;
   if (s.hunger <= 0) d -= r.hurt;
   if (s.thirst <= 0) d -= r.hurt;
-  if (poops.length >= 4) d -= r.filth;
-  if (s.happy <= 5) d -= r.filth;
-  if (d === 0 && s.hunger > 40 && s.thirst > 40 && poops.length < 4) d = r.heal;
+  if (poops.length >= 3) d -= r.filth;
+  if (s.happy <= 10) d -= r.filth;
+  if (d === 0 && s.hunger > 40 && s.thirst > 40 && poops.length < 3) d = r.heal;
   s.health = clamp(s.health + d * dt, 0, 100);
 }
 function simulateAway(secs) {
@@ -502,7 +502,7 @@ function simulateAway(secs) {
   const rep = turtles.map(t => ({ t, ate: 0, drank: 0, pooped: 0, stage0: stageOf(t.growth), starved: false, parched: false, lowHealth: 100 }));
   let dryAt = null, fed = 0, feedAcc = 0;
   const pond = objOf('pond'), feeder = up.feeder && objOf('feeder'), B = BOWLS[up.bowl], F = FEEDERS[up.feeder];
-  const enrich = Math.max(0.4, 1 - 0.08 * structCount()); // play structures keep turtles happier while you're gone
+  const enrich = Math.max(0.55, 1 - 0.05 * structCount()); // structures help, but won't replace a daily check-in
   const lamp = objOf('lamp'), t0ms = Date.now() - secs * 1000;
   let crabAcc = 0, cleaned = 0, grown = 0;
   for (let i = 0; i < n; i++) {
@@ -519,37 +519,37 @@ function simulateAway(secs) {
     for (const r of rep) {
       const t = r.t, s = t.st;
       if (t.arrived && simNow < t.arrived) continue; // moved here later: this part of the gap wasn't theirs
-      s.hunger = clamp(s.hunger - dt * AWAY.hunger * lerp(0.85, 1.2, t.traits.appetite) * (lamp ? 0.9 : 1), 0, 100);
+      s.hunger = clamp(s.hunger - dt * AWAY.hunger * lerp(0.85, 1.2, t.traits.appetite) * (lamp ? 0.95 : 1), 0, 100);
       s.thirst = clamp(s.thirst - dt * AWAY.thirst, 0, 100);
       if (s.thirst < 55 && (pond || waterTiles.length)) { s.thirst = 100; r.drank++; r.pond = true; } // all-you-can-drink pond
       else if (s.thirst < 55 && bowl.level > 0.01) { // wander over for a drink
-        const sip = Math.min(bowl.level, 0.12 / B.cap);
-        bowl.level -= sip; s.thirst = clamp(s.thirst + sip * B.cap * 333, 0, 100); r.drank++;
+        const sip = Math.min(bowl.level, 0.22 / B.cap);
+        bowl.level -= sip; s.thirst = clamp(s.thirst + sip * B.cap * 260, 0, 100); r.drank++;
         if (bowl.level <= 0.01 && dryAt === null && !B.refill) dryAt = i * dt;
       }
       if (s.hunger < 70 && foods.length) { // munch leftovers
         const f = foods.shift();
         if (f.slot !== undefined && plots[f.slot]) plots[f.slot].t0 = simNow; // garden replants itself
-        s.hunger = clamp(s.hunger + f.bites * 12, 0, 100); r.ate++;
+        s.hunger = clamp(s.hunger + f.bites * 10, 0, 100); r.ate++;
         t.diet.push(f.type); if (t.diet.length > 6) t.diet.shift();
         if (f.type === 'berry') t.chub = clamp(t.chub + 0.05, 0, 1);
-        t.growth = clamp(t.growth + f.bites * GROW_PER_BITE * GROW_RATE * 0.8, 0, 1);
+        t.growth = clamp(t.growth + f.bites * GROW_PER_BITE * GROW_RATE * 0.75, 0, 1);
         t.gut.push(rand(15, 28) * 40); // digests over ~10-20 min while away
       }
       for (let g = t.gut.length - 1; g >= 0; g--) {
         t.gut[g] -= dt;
         if (t.gut[g] <= 0) {
           t.gut.splice(g, 1); r.pooped++;
-          if (poops.length < 12) poops.push({ x: rand(40, YW - 40), y: rand(40, YH - 40), s: rand(0.85, 1.15), born: 1 });
+          if (poops.length < 14) poops.push({ x: rand(40, YW - 40), y: rand(40, YH - 40), s: rand(0.85, 1.15), born: 1 });
         }
       }
       let drain = (AWAY.happy + poops.length * AWAY.dirty) * enrich;
-      if (s.hunger < 20 || s.thirst < 20) drain += AWAY.happy * 2;
+      if (s.hunger < 25 || s.thirst < 25) drain += AWAY.happy * 2.5;
       s.happy = clamp(s.happy - dt * drain, 0, 100);
       // moods: friends keep each other company, everyone sleeps, a turtle alone gets lonely
-      s.social = clamp(s.social + dt * AWAY.happy * (turtles.length > 1 ? 3 : -lerp(0.5, 2, t.traits.friendly)), 15, 100);
+      s.social = clamp(s.social + dt * AWAY.happy * (turtles.length > 1 ? 2.5 : -lerp(0.75, 2.2, t.traits.friendly)), 10, 100);
       s.energy = clamp(s.energy + dt * 0.01, 0, 100);
-      t.chub = clamp(t.chub - dt * 0.000015, 0, 1); // slims down slowly: a berry binge still shows the next morning
+      t.chub = clamp(t.chub - dt * 0.000018, 0, 1); // slims down slowly: a berry binge still shows the next morning
       healthStep(t, dt, AWAY);
       s.health = Math.max(s.health, AWAY_FLOOR); // never dies while you're away: at worst comes back sick
       if (s.health > 50 && s.hunger > 40 && s.thirst > 40) t.growth = clamp(t.growth + dt * GROW_PER_SEC * GROW_RATE * (lamp ? 1.15 : 1), 0, 1);
@@ -557,15 +557,15 @@ function simulateAway(secs) {
       if (s.thirst <= 0) r.parched = true;
       r.lowHealth = Math.min(r.lowHealth, s.health);
     }
-    if (up.crab) { // crabs tidy up
+    if (up.crab) { // crabs tidy up, enough for a school day without keeping up forever
       crabAcc += dt;
-      const every = 1200 / up.crab;
+      const every = 900 / up.crab;
       while (crabAcc >= every) { crabAcc -= every; if (poops.length) { poops.pop(); cleaned++; } }
     }
   }
   turtles.forEach(t => t.mud = Math.max(0, (t.mud || 0) - secs / 900));
   const chilly = darkness() > 0.5 && !lamp && !['hut', 'cave', 'heatrock', 'mossbed'].some(objOf); // a cold night with nowhere warm
-  turtles.forEach(t => t.st.warm = chilly ? Math.min(t.st.warm, 45) : 100);
+  turtles.forEach(t => t.st.warm = chilly ? Math.min(t.st.warm, 35) : 100);
   turtles.forEach(t => t.S = sizeFor(t.growth));
   return { secs, rep, dryAt, fed, cleaned, grown };
 }
