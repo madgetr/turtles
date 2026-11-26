@@ -1986,10 +1986,50 @@ const DROP_EVERY = 3 * 3600e3, MAX_DROPS = 3, MILESTONES = { 7: 50, 30: 200, 100
 let loot = { last: 0, treasures: [], found: {}, sets: [], visits: 0, day: '', gift: null, jobs: null, powers: {}, boostUntil: 0, parcels: [], mailSeen: [] };
 let pendingReward = null;
 
+// Most finds only turn up once the yard has the right thing from the shop in it. The game never says which:
+// buying things is how you find out. One common per set needs nothing, so every set gets started.
+// Placed things and yard upgrades count for the yard you're in; toys count everywhere.
+// Each gate says how many of that thing the yard has (0 = locked). More of it means that find turns up more
+// often: every extra decoration of the kind, wildlife level or size upgrade adds half again (up to 4x).
+const decoN = type => objs.filter(o => o.kind === 'deco' && o.type === type).length;
+const objN = kind => (objOf(kind) ? 1 + (up.size[kind] || 0) : 0); // a placed thing, plus any size upgrades
+const GATES = {
+  glass: () => decoN('shell'),              // seashell decoration
+  starfish: () => objN('sandrock'),         // sandstone rock
+  bottle: () => objN('pond'),
+  pearl: () => Math.max(0, up.bowl - 1),    // fountain, grand fountain
+  gem: () => decoN('lantern'),
+  orb: () => objN('fog'),
+  ring: () => up.birds,                     // bird feeder: magpies love shiny things
+  crown: () => objN('cave'),
+  bone: () => objN('mud'),
+  leaf: () => decoN('bush'),
+  acorn: () => decoN('tree'),
+  shroom: () => decoN('mushrooms'),
+  sunflower: () => objN('lamp'),
+  rose: () => decoN('flowers'),
+  clover: () => objN('mossrock'),
+  hibiscus: () => up.lily,                  // lily pads
+  bee: () => decoN('bbush'),
+  caterpillar: () => up.garden,
+  cricket: () => objN('log'),
+  butterfly: () => up.bugs,                 // bug hotel
+  balloon: () => objN('slide'),
+  key: () => objN('hut'),
+  compass: () => objN('lookout'),
+  teddy: () => (up.toys.includes('bell') ? 1 : 0),
+};
+const gateN = id => (GATES[id] ? GATES[id]() || 0 : 1);
+const canFind = id => gateN(id) > 0;
+const gateBoost = id => Math.min(4, 1 + 0.5 * (gateN(id) - 1));
+const findable = () => Object.keys(ITEMS).filter(canFind);
+
 // pick a find: commons are likelier; things you don't have yet get a little boost
 function rollItem(setKey, minRar = 0) {
-  const pool = Object.values(ITEMS).filter(it => (!setKey || it.set === setKey) && it.rar >= minRar);
-  const w = it => ({ 1: 6, 2: 3, 3: 1 }[it.rar]) * (loot.found[it.id] ? 1 : 1.6);
+  const ok = Object.values(ITEMS).filter(it => (!setKey || it.set === setKey) && canFind(it.id));
+  let pool = ok.filter(it => it.rar >= minRar);
+  if (!pool.length) pool = ok.filter(it => it.rar === Math.max(...ok.map(x => x.rar))); // nothing that rare unlocked yet: the rarest it can be
+  const w = it => ({ 1: 6, 2: 3, 3: 1 }[it.rar]) * (loot.found[it.id] ? 1 : 1.6) * gateBoost(it.id);
   let r = Math.random() * pool.reduce((a, it) => a + w(it), 0);
   for (const it of pool) if ((r -= w(it)) <= 0) return it.id;
   return pool[0].id;
@@ -2632,7 +2672,8 @@ bookEl.querySelector('.sets').addEventListener('click', e => {
   if (!it) return;
   bookEl.querySelector('.fact').textContent = loot.found[id]
     ? `${it.icon} ${it.name} (${RARITY[it.rar]}, ×${loot.found[id]}): ${it.fact}`
-    : `Not found yet. ${RARITY[it.rar]} · keep an eye out for ✨ in the yard!`;
+    : canFind(id) ? `Not found yet. ${RARITY[it.rar]} · it could turn up in this yard now. Keep an eye out for ✨!`
+      : `Not found yet. ${RARITY[it.rar]} · this one won't turn up until the yard has the right thing in it… 🤔`;
 });
 function openJobs() {
   const L = loot.jobs?.list || [];
@@ -3513,7 +3554,8 @@ shopList.addEventListener('click', e => {
   if (r.action) return r.action();
   if (stars < r.cost) return;
   stars -= r.cost; buzz([20, 40, 20]); snd.play('buy');
-  try { r.buy(); } catch (err) { stars += r.cost; save(); renderShop(); say('Oops, that didn\'t work. Your stars are back ⭐', 3000); console.error(err); return; }
+  const before = findable();
+  try { r.buy(); if (findable().some(id => !before.includes(id) && !loot.found[id])) setTimeout(() => say('✨ Hmm… something new might turn up in this yard now', 3500), 4200); } catch (err) { stars += r.cost; save(); renderShop(); say('Oops, that didn\'t work. Your stars are back ⭐', 3000); console.error(err); return; }
   emit(cam.x, cam.y, 'sparkle', 10);
   save();
   if (!shop.hidden) renderShop();
