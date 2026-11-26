@@ -856,8 +856,8 @@ function think(dt) {
   if (want !== 0) T.a += clamp(angDiff(T.a, desiredA), -turnRate * dt, turnRate * dt);
   T.v = lerp(T.v, want, dt * (want > T.v ? 2.2 : 5));
   T.x += Math.cos(T.a) * T.v * dt; T.y += Math.sin(T.a) * T.v * dt;
-  // keep out of the bowl and feeder, and inside the yard
-  for (const [o, r] of solids()) {
+  // keep out of the feeder and inside the yard; the bowl is low enough to walk straight over
+  for (const [o, r] of solids(false)) {
     const d = dist(T, o), minD = r + S * 0.9;
     if (d < minD && d > 0.01) { T.x = o.x + (T.x - o.x) / d * minD; T.y = o.y + (T.y - o.y) / d * minD; }
   }
@@ -883,9 +883,10 @@ function think(dt) {
   T.tailT += dt * (2 + T.v * 0.12);
 }
 
-function solids() {
-  const f = objOf('feeder');
-  return f ? [[bowl, bowl.r], [f, FEEDER_R]] : [[bowl, bowl.r]];
+function solids(withBowl = true) { // the ball still bounces off the bowl; turtles walk over it
+  const f = objOf('feeder'), s = withBowl ? [[bowl, bowl.r]] : [];
+  if (f) s.push([f, FEEDER_R]);
+  return s;
 }
 
 // ---------- procedural legs: foot planting with diagonal gait ----------
