@@ -3474,7 +3474,7 @@ function separate() {
 // The relay only passes messages between two games. The host says yes to every visit, a visitor can look but
 // not touch, and there is no chat: games only send yard snapshots, turtle moves and gift offers.
 // Friends are kept on this device only: a random device id plus the name you gave them.
-const RELAY_DEFAULT = ''; // after deploying the relay: 'wss://turtle-yard-relay.<your-subdomain>.workers.dev'
+const RELAY_DEFAULT = 'wss://turtle-yard-relay.turtle-yard-relay.workers.dev'; // the deployed relay (server/)
 const isLocalDev = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !isNativeApp;
 // local testing only: ?relay=ws://127.0.0.1:8787 (never on the real site, so a link can't point a game at another server)
 const RELAY_URL = (isLocalDev && (new URLSearchParams(location.search).get('relay') || localStorage.getItem('turtle-relay'))) || RELAY_DEFAULT;
