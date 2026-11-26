@@ -2065,10 +2065,17 @@ function drawLoot(time, v) {
   for (const pc of loot.parcels) { // care packages from friends, with who sent them
     if (pc.x === undefined) placeParcel(pc);
     if (!inView(pc, 60, v)) continue;
-    const gs = Math.max(34, 24 / cam.z), hop = Math.abs(Math.sin(time * 2.6 + pc.x)) * gs * 0.15;
+    const P = PKG[pc.tier || 0], gs = Math.max(34, 24 / cam.z) * P.size, hop = Math.abs(Math.sin(time * 2.6 + pc.x)) * gs * 0.15;
+    if (P.glow) { // big and grand boxes shine so they're easy to spot
+      const pulse = 0.5 + 0.5 * Math.sin(time * 3 + pc.x), gr = gs * (0.9 + 0.25 * pulse) * P.glow;
+      const glow = c.createRadialGradient(pc.x, pc.y, 0, pc.x, pc.y, gr);
+      glow.addColorStop(0, `rgba(255,220,110,${0.35 + 0.25 * pulse})`); glow.addColorStop(1, 'rgba(255,220,110,0)');
+      c.fillStyle = glow; c.beginPath(); c.arc(pc.x, pc.y, gr, 0, 7); c.fill();
+    }
     c.fillStyle = '#0003'; c.beginPath(); c.ellipse(pc.x, pc.y + gs * 0.35, gs * 0.45 * (1 - hop / gs), gs * 0.15, 0, 0, 7); c.fill();
     drawEmoji(c, '📦', pc.x, pc.y - hop, gs);
-    const sp = textSprite(`from ${pc.name}`, '700 24px system-ui, sans-serif', '#fff', '#0009', 6), k = Math.max(11, 9 / cam.z) / 24; // one sprite, scaled with the zoom
+    if (P.glow > 1) drawEmoji(c, '✨', pc.x + gs * 0.4, pc.y - hop - gs * 0.4, gs * 0.45);
+    const sp = textSprite(`${P.tag}from ${pc.name}`, '700 24px system-ui, sans-serif', '#fff', '#0009', 6), k = Math.max(11, 9 / cam.z) / 24; // one sprite, scaled with the zoom
     c.drawImage(sp.cv, pc.x - sp.w * k / 2, pc.y + gs * 0.72 - sp.h * k / 2, sp.w * k, sp.h * k);
   }
 }
@@ -3557,7 +3564,7 @@ function netOn(m) {
     case 'package-sent': case 'package-fail': {
       const f = friendOf(m.to); net.sending = null;
       if (m.t === 'package-sent' || m.why === 'already') { if (f) { f.sent = new Date().toDateString(); saveFriends(); } }
-      if (m.t === 'package-sent') { snd.play('job'); say(`📦 Care package on its way to ${friendName(m.to)}!`, 3000); }
+      if (m.t === 'package-sent') { snd.play('job'); say(`📦 ${PKG[myPkgTier()].name} on its way to ${friendName(m.to)}!`, 3000); }
       else say(m.why === 'already' ? `📦 You already sent ${friendName(m.to)} a package today` : m.why === 'full' ? `📬 ${friendName(m.to)}'s mailbox is full. Try tomorrow`
         : `📦 ${friendName(m.to)} needs to have you as a friend too`, 3500);
       renderFriends();
@@ -3826,10 +3833,15 @@ function onGiftReply(from, d) {
 // likeliest, finds you don't have yet favoured). Opening one sends the sender a thank-you worth a few stars.
 const THANK_STARS = 5;
 const sentToday = f => f.sent === new Date().toDateString();
+function pkgSizeLine() { // "Your game is worth ⭐ 3,240, so you send big boxes. At ⭐ 6,000: huge boxes!"
+  const worth = gameWorth(), i = pkgTierFor(worth), next = PKG[i + 1];
+  return `Your game is worth ⭐ ${worth.toLocaleString()}, so you send ${PKG[i].tag ? PKG[i].tag.trim().toLowerCase() + 'es' : 'small boxes'}.`
+    + (next ? ` At ⭐ ${next.min.toLocaleString()}: ${next.tag.trim().toLowerCase()}es!` : ' The best there is!');
+}
 function sendPackage(id) {
   const f = friendOf(id);
   if (!f || sentToday(f) || !net.up || net.sending) return;
-  net.sending = id; netSend({ t: 'package', to: id }); renderFriends();
+  net.sending = id; netSend({ t: 'package', to: id, tier: myPkgTier() }); renderFriends();
 }
 function onMail(items) {
   if (!Array.isArray(items)) return;
@@ -3839,7 +3851,7 @@ function onMail(items) {
     netSend({ t: 'ack', mid: it.mid });
     if (loot.mailSeen.includes(it.mid)) continue; // delivered twice (an ack got lost)
     loot.mailSeen = [...loot.mailSeen, it.mid].slice(-100);
-    if (it.kind === 'package') { loot.parcels.push({ from: it.from, name: friendName(it.from), mid: it.mid }); got++; }
+    if (it.kind === 'package') { loot.parcels.push({ from: it.from, name: friendName(it.from), mid: it.mid, tier: clamp(it.tier | 0, 0, PKG.length - 1) }); got++; }
     else if (it.kind === 'thanks') { stars += THANK_STARS; say(`💌 ${friendName(it.from)} opened your care package! +${THANK_STARS} ⭐`, 3500); snd.play('star'); }
   }
   if (got) { snd.play('gift'); say(got > 1 ? `📦 ${got} care packages arrived! Find them in your yard` : `📦 A care package from ${loot.parcels[loot.parcels.length - 1].name} arrived! Find it in your yard`, 4000); }
@@ -3852,21 +3864,58 @@ function placeParcel(pc) { // somewhere open near the middle of the yard you're 
     keepInYard(p); pc.x = p.x; pc.y = p.y; return;
   }
 }
-function rollPackage() {
-  const r = Math.random(), got = r < 0.05 ? 50 : r < 0.2 ? 30 : Math.round(rand(10, 20));
-  if (Math.random() >= 0.5) return { got, it: null };
-  const q = Math.random(), rar = q < 0.05 ? 3 : q < 0.3 ? 2 : 1; // Common 70%, Uncommon 25%, Rare 5%
+// How big a package is depends on what the sender's whole game is worth when they send it (see gameWorth):
+// richer friends send bigger boxes.
+// stars = usual range (15% of the time 1.5x the top, 5% of the time 2.5x); find = chance of a find; rar = Common/Uncommon/Rare %
+const PKG = [
+  { min: 0, name: 'Care package', tag: '', size: 1, glow: 0, stars: [10, 20], find: 0.5, rar: [70, 25, 5] },
+  { min: 1500, name: 'Big care package', tag: 'Big box ', size: 1.15, glow: 0, stars: [20, 35], find: 0.65, rar: [60, 30, 10] },
+  { min: 6000, name: 'Huge care package', tag: 'Huge box ', size: 1.3, glow: 1, stars: [35, 60], find: 0.8, rar: [45, 40, 15] },
+  { min: 20000, name: 'Treasure chest care package', tag: 'Treasure box ', size: 1.5, glow: 1.4, stars: [60, 100], find: 1, rar: [30, 45, 25] },
+];
+// What your whole game is worth in stars: stars in hand, plus the shop price of everything you've bought or earned
+// in every yard (yards, upgrades, things placed, turtles), toys and brushes, and your collection.
+const FIND_WORTH = { 1: 15, 2: 40, 3: 120 }, REWARD_WORTH = 300, MORPH_WORTH = [0, 30, 100, 300, 800];
+const costsUpTo = (list, lv) => list.slice(1, (lv || 0) + 1).reduce((a, x) => a + (x?.cost || 0), 0); // levels 1..lv
+function yardWorth(y) {
+  const u = y.up || {};
+  let w = costsUpTo(YARDS, u.yard) + costsUpTo(BOWLS, u.bowl) + costsUpTo(FEEDERS, u.feeder);
+  w += [0, 70, 210, 660][u.garden || 0] + [0, 90, 250, 570, 1170][u.crab || 0];
+  for (const k in SIZES) w += costsUpTo(SIZES[k], u.size?.[k]);
+  for (const [k, key] of [['birdfeeder', 'birds'], ['lily', 'lily'], ['bughotel', 'bugs']]) w += WILD[k].costs.slice(0, u[key] || 0).reduce((a, c) => a + c, 0);
+  const seen = {};
+  for (const o of y.objs || []) {
+    if (o.kind === 'deco') { const d = DECOS[o.type]; if (!d) continue; const n = seen[o.type] = (seen[o.type] || 0) + 1; w += d.reward ? REWARD_WORTH : d.cost + (d.step || 0) * (n - 1); }
+    else w += (STRUCTS[o.kind] || ROCKS[o.kind] || (o.kind === 'lamp' ? AUTO.lamp : null))?.cost || 0; // feeder, garden and wildlife: counted with their upgrades
+  }
+  (y.turtles || []).forEach((t, i) => { w += (i ? Math.round(25 * i ** 1.6 / 5) * 5 : 0) + MORPH_WORTH[morphInfo(t).rarity]; });
+  return w;
+}
+function gameWorth() {
+  let w = stars + YARD_COSTS.slice(0, yards.length - 1).reduce((a, c) => a + c, 0);
+  yards.forEach((y, j) => { w += yardWorth(j === yardIdx ? (visit ? visit.home : packYard()) : y); });
+  w += up.toys.reduce((a, k) => a + (TOYS[k]?.cost || 0), 0) + up.brushes.reduce((a, k) => a + (GROUND[k]?.cost || 0), 0) + up.vet * 40;
+  for (const [id, n] of Object.entries(loot.found)) if (ITEMS[id]) w += FIND_WORTH[ITEMS[id].rar] * n;
+  return Math.round(w);
+}
+const pkgTierFor = worth => PKG.reduce((t, P, i) => (worth >= P.min ? i : t), 0);
+const myPkgTier = () => pkgTierFor(gameWorth());
+function rollPackage(tier = 0) {
+  const P = PKG[clamp(tier | 0, 0, PKG.length - 1)], [lo, hi] = P.stars, r = Math.random();
+  const got = r < 0.05 ? Math.round(hi * 2.5) : r < 0.2 ? Math.round(hi * 1.5) : Math.round(rand(lo, hi));
+  if (Math.random() >= P.find) return { got, it: null };
+  const q = Math.random() * 100, rar = q < P.rar[2] ? 3 : q < P.rar[2] + P.rar[1] ? 2 : 1;
   const pool = Object.values(ITEMS).filter(i => i.rar === rar), w = i => (loot.found[i.id] ? 1 : 3);
   let x = Math.random() * pool.reduce((a, i) => a + w(i), 0);
   return { got, it: pool.find(i => (x -= w(i)) <= 0) || pool[0] };
 }
 function openParcel(pc) {
   loot.parcels = loot.parcels.filter(x => x !== pc);
-  const { got, it } = rollPackage();
+  const { got, it } = rollPackage(pc.tier), P = PKG[pc.tier || 0];
   earn(got, pc.x, pc.y - 30); emit(pc.x, pc.y, 'sparkle', 18); buzz([20, 40, 20]); snd.play('gift');
   let line = `+${got} ⭐`;
   if (it) { const isNew = addFind(it.id); line += ` and ${it.icon} ${it.name} · ${RARITY[it.rar]}${isNew ? ' (new!)' : ''}`; }
-  showFind('📦', `Care package from ${pc.name}!`, line, it ? it.fact : 'Send one back from 👫 Friends: you can send each friend one care package a day.');
+  showFind('📦', `${P.name} from ${pc.name}!`, line, it ? it.fact : 'Send one back from 👫 Friends: you can send each friend one care package a day.');
   sendThanks(pc.from);
   save();
 }
@@ -3890,7 +3939,7 @@ function renderFriends() {
   if (friendsEl.hidden) return;
   if (net.code && Date.now() > net.codeExp) net.code = null;
   friendsEl.querySelector('.sub').textContent = !net.up ? '📶 Connecting to the turtle post office…'
-    : giftTurtle ? `🎁 Pick a friend to give ${giftTurtle.name} to. They need to be online.` : "Visit yards, give turtles, and send each friend a 📦 care package every day";
+    : giftTurtle ? `🎁 Pick a friend to give ${giftTurtle.name} to. They need to be online.` : `Visit yards, give turtles, and send each friend a 📦 care package every day. ${pkgSizeLine()}`;
   friendsEl.querySelectorAll('.grp').forEach(g => { g.hidden = !!giftTurtle; });
   const codeEl = friendsEl.querySelector('.code'), openB = friendsEl.querySelector('.open');
   codeEl.hidden = !net.code;
@@ -3904,7 +3953,7 @@ function renderFriends() {
     const on = net.online.has(f.id), here = net.guests.has(f.id);
     const sent = sentToday(f);
     const act = giftTurtle ? `<button class="act go give" ${on ? '' : 'disabled'}>🎁 Give</button>`
-      : `<button class="act pkg ${sent ? 'done' : ''}" ${!sent && net.up && !net.sending ? '' : 'disabled'} aria-label="Send a care package">${sent ? '📦✓' : '📦'}</button><button class="act go visit" ${on && net.up && !net.knocking ? '' : 'disabled'}>👀 Visit</button>`;
+      : `<button class="act pkg ${sent ? 'done' : 'go'}" ${!sent && net.up && !net.sending ? '' : 'disabled'} aria-label="Send a care package">${sent ? '📦 ✓' : '📦 Send'}</button><button class="act go visit" ${on && net.up && !net.knocking ? '' : 'disabled'}>👀 Visit</button>`;
     return `<div class="fr ${giftTurtle ? '' : 'wide'}" data-id="${esc(f.id)}"><i class="dot ${on ? 'on' : ''}"></i><button class="nm">${esc(f.name)}<small>${here ? 'Visiting you now' : on ? 'Online now' : 'Not online'}${sent ? ' · 📦 sent today' : ''}</small></button>${act}<button class="x" aria-label="Remove">✕</button></div>`;
   }).join('') : '<div class="empty">No friends yet. Swap visit codes to add one!</div>';
 }

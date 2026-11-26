@@ -12,7 +12,7 @@
 //   answer  { to, yes }             host's reply to a knock; yes = the two of you are linked until one leaves
 //   relay   { to, data }            pass data to a linked player or a mutual friend
 //   leave   { to }                  end a link
-//   package { to }                  send today's care package to a friend (one per friend per day, kept up to 7 days)
+//   package { to, tier }            send today's care package (tier 0-3 = how big) to a friend (one per friend per day, kept up to 7 days)
 //   thanks  { to }                  tell a friend you opened their package (they get a thank-you note)
 //   ack     { mid }                 got this mail; delete it
 //
@@ -57,6 +57,7 @@ export class Hub {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS sent (kind TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, day TEXT NOT NULL,
       PRIMARY KEY (kind, from_id, to_id, day))`);
     this.sql.exec(`CREATE INDEX IF NOT EXISTS mail_to ON mail (to_id)`);
+    try { this.sql.exec('ALTER TABLE mail ADD COLUMN tier INTEGER NOT NULL DEFAULT 0'); } catch { } // package size (added later; fails once it exists)
   }
 
   async fetch(req) {
@@ -116,16 +117,16 @@ export class Hub {
   friendsBothWays(a, b) { return this.storedFriends(a).includes(b) && this.storedFriends(b).includes(a); }
   sendMail(id) { // push waiting mail to a connected game
     const s = this.sockOf(id); if (!s) return;
-    const items = this.sql.exec('SELECT mid, kind, from_id AS "from", at FROM mail WHERE to_id = ? ORDER BY mid', id).toArray();
+    const items = this.sql.exec('SELECT mid, kind, from_id AS "from", at, tier FROM mail WHERE to_id = ? ORDER BY mid', id).toArray();
     if (items.length) this.send(s, { t: 'mail', items });
   }
-  post(kind, from, to) { // returns null, or why it couldn't be posted
+  post(kind, from, to, tier = 0) { // returns null, or why it couldn't be posted
     const n = this.sql.exec('SELECT COUNT(*) AS n FROM mail WHERE to_id = ?', to).one().n;
     if (n >= MAX_MAIL) return 'full';
     const day = today();
     if (this.sql.exec('SELECT 1 FROM sent WHERE kind = ? AND from_id = ? AND to_id = ? AND day = ?', kind, from, to, day).toArray().length) return 'already';
     this.sql.exec('INSERT INTO sent (kind, from_id, to_id, day) VALUES (?, ?, ?, ?)', kind, from, to, day);
-    this.sql.exec('INSERT INTO mail (kind, to_id, from_id, day, at) VALUES (?, ?, ?, ?, ?)', kind, to, from, day, Date.now());
+    this.sql.exec('INSERT INTO mail (kind, to_id, from_id, day, at, tier) VALUES (?, ?, ?, ?, ?, ?)', kind, to, from, day, Date.now(), tier);
     this.sendMail(to);
     return null;
   }
@@ -188,7 +189,8 @@ export class Hub {
       case 'thanks': {
         if (typeof m.to !== 'string' || !ID_RE.test(m.to) || m.to === a.id) return;
         if (!this.friendsBothWays(a.id, m.to)) return this.send(ws, { t: `${m.t}-fail`, to: m.to, why: 'not friends' });
-        const why = this.post(m.t, a.id, m.to);
+        const tier = m.t === 'package' ? Math.max(0, Math.min(3, m.tier | 0)) : 0; // how big: the sender's game decides (0-3)
+        const why = this.post(m.t, a.id, m.to, tier);
         this.send(ws, why ? { t: `${m.t}-fail`, to: m.to, why } : { t: `${m.t}-sent`, to: m.to });
         break;
       }
