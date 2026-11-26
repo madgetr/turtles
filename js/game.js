@@ -1090,6 +1090,7 @@ function useVet(t, auto) {
 }
 
 function grow(amount) {
+  if (!(amount > 0)) return; // only ever forwards: a full-grown turtle dipping below 1 would "grow up" again for +10
   const before = stageOf(T.growth);
   T.growth = clamp(T.growth + amount * GROW_RATE, 0, 1);
   const after = stageOf(T.growth);
@@ -4101,7 +4102,7 @@ function frame(now) {
 }
 function frameBody(now) {
   adaptRes(now - last);
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const dt = clamp((now - last) / 1000, 0, 0.05); last = now; // the first frame's timestamp can be a bit before `last`: never run time backwards
   const time = now / 1000;
   graceT -= dt; waterStarCool -= dt;
   followCam(dt);
