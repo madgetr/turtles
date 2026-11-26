@@ -3755,12 +3755,21 @@ function renderVisitBar() {
 }
 
 // ----- gifts: a turtle moves to a friend's yard (both games must say yes) -----
+// Yards are kept packed while you're not in them (and the one you're in is rebuilt when you switch), so a turtle
+// is tracked by its hatch time + name, not by object, and looked for in every yard.
 let giftTurtle = null;
+const sameTurtle = (a, b) => a.born === b.born && a.name === b.name;
+function yardTurtles(j) { // { list, live, fits } for yard j; live = the yard on screen (your own, or the one you left to visit)
+  if (j === yardIdx && !visit) return { list: turtles.filter(t => t.releasing === undefined), live: true, fits: Math.min(MAX_TURTLES, YARDS[up.yard || 0].fits) };
+  const y = j === yardIdx ? visit.home : yards[j];
+  return { list: y.turtles, live: false, fits: Math.min(MAX_TURTLES, YARDS[y.up?.yard || 0].fits) };
+}
+const yardNameOf = j => (j === yardIdx ? (visit ? visit.home.name : yardName) : yards[j].name);
 function sendGift(to) {
   const t = giftTurtle; giftTurtle = null; friendsEl.hidden = true;
   if (!t || !turtles.includes(t)) return;
   if (turtles.length < 2) return say("You can't give away your only turtle", 3000);
-  net.gift = { to, t, id: Math.random().toString(36).slice(2) };
+  net.gift = { to, key: { born: t.born, name: t.name }, name: t.name, id: Math.random().toString(36).slice(2) };
   relay(to, { k: 'gift', id: net.gift.id, turtle: packTurtle(t) });
   say(`🎁 Waiting for ${friendName(to)} to say yes to ${t.name}…`, 4000);
 }
@@ -3771,36 +3780,45 @@ function onGiftOffer(from, d) {
     'Adopt', 'No thanks', () => acceptGift(from, d.id, p), () => relay(from, { k: 'gift-no', id: d.id }));
 }
 function acceptGift(from, id, p) {
-  const home = visit && !visit.pending ? visit.home : null; // visiting? the turtle waits in your own yard
-  const list = home ? home.turtles : turtles.filter(t => t.releasing === undefined);
-  const fits = Math.min(MAX_TURTLES, YARDS[(home ? home.up : up)?.yard || 0].fits);
-  if (list.length >= fits) { relay(from, { k: 'gift-no', id, full: true }); return say(`🏡 Your yard is full, so ${p.name} couldn't come. Make room and ask again`, 4000); }
+  // the yard you're in if it has room (when visiting, the one you left), otherwise the first yard that does
+  const order = [yardIdx, ...yards.map((_, j) => j).filter(j => j !== yardIdx)];
+  const j = order.find(i => { const r = yardTurtles(i); return r.list.length < r.fits; });
+  if (j === undefined) { relay(from, { k: 'gift-no', id, full: true }); return say(`🏡 All your yards are full, so ${p.name} couldn't come. Make room and ask again`, 4000); }
   if (!relay(from, { k: 'gift-yes', id })) return say(`📶 Couldn't reach ${friendName(from)}. Try again?`, 3000);
   p.arrived = Date.now();
-  if (home) {
-    const m = YARDS[home.up?.yard || 0].m;
-    home.turtles.push({ ...p, x: base.w * m / 2 + rand(-40, 40), y: base.h * m / 2 + rand(-40, 40), a: rand(-3, 3) });
-  } else {
+  const r = yardTurtles(j);
+  if (r.live) {
     const t = makeTurtle({ ...p, x: cam.x + rand(-30, 30), y: cam.y + rand(-30, 30), a: rand(-3, 3) });
     keepInYard(t); turtles.push(t); use(t); resetFeet(); use(sel);
     emit(t.x, t.y, 'sparkle', 20);
+  } else {
+    const y = j === yardIdx ? visit.home : yards[j], m = YARDS[y.up?.yard || 0].m;
+    r.list.push({ ...p, x: base.w * m / 2 + rand(-40, 40), y: base.h * m / 2 + rand(-40, 40), a: rand(-3, 3) });
   }
   save(); renderPills();
-  snd.play('fanfare'); say(`🎁 ${p.name} joined your yard${home ? ' (waiting for you at home)' : ''}! Thank you, ${friendName(from)}!`, 4000);
+  const where = yards.length > 1 || !r.live ? ` ${yardNameOf(j)}` : ' your yard';
+  snd.play('fanfare'); say(`🎁 ${p.name} joined${where}${visit && j === yardIdx ? ' (waiting for you at home)' : ''}! Thank you, ${friendName(from)}!`, 4500);
 }
 function onGiftReply(from, d) {
   const g = net.gift;
   if (!g || g.to !== from || g.id !== d.id) return;
   net.gift = null;
   if (d.k === 'gift-no') return say(d.full ? `🏡 ${friendName(from)}'s yard is full` : `${friendName(from)} said no thanks`, 3000);
-  const t = g.t;
-  if (turtles.includes(t) && turtles.length > 1) {
-    emit(t.x, t.y, 'sparkle', 16);
-    turtles = turtles.filter(x => x !== t);
-    if (sel === t) sel = turtles[0];
-    use(sel); save();
+  // find the turtle in whichever yard it's in now (you may have switched or moved it while waiting)
+  for (let j = 0; j < yards.length; j++) {
+    const r = yardTurtles(j), t = r.list.find(x => sameTurtle(x, g.key));
+    if (!t) continue;
+    if (r.list.length < 2) break; // never empty a yard (they keep a copy, rather than leave it bare)
+    if (r.live) {
+      emit(t.x, t.y, 'sparkle', 16);
+      turtles = turtles.filter(x => x !== t);
+      if (sel === t) sel = turtles[0];
+      use(sel);
+    } else r.list.splice(r.list.indexOf(t), 1);
+    save(); renderPills();
+    break;
   }
-  snd.play('job'); say(`🎁 ${t.name} went to live with ${friendName(from)}! 💚`, 4000);
+  snd.play('job'); say(`🎁 ${g.name} went to live with ${friendName(from)}! 💚`, 4000);
 }
 
 // ----- care packages: one a day to each friend, waiting in the relay's mailbox if they're away -----
