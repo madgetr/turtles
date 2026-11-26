@@ -38,6 +38,26 @@ B.send({ t: 'knock', to: A.id }); ok((await A.next('knock')).byCode === false, '
 B.send({ t: 'relay', to: A.id, data: 'gift' }); ok((await A.next('relay')).data === 'gift', 'friends relay without a visit');
 B.ws.close(); ok((await A.next('online')).ids.length === 0, 'friend going offline is noticed');
 
+// care packages: mailbox works while the friend is away
+const D = player(rid()), E = player(rid());
+await Promise.all([D.open, E.open]);
+D.send({ t: 'hello', friends: [E.id] }); await D.next('online');
+E.send({ t: 'hello', friends: [D.id] }); await E.next('online'); await D.next('online');
+C.send({ t: 'package', to: D.id }); ok((await C.next('package-fail')).why === 'not friends', 'strangers cannot send packages');
+E.ws.close(); await D.next('online');
+D.send({ t: 'package', to: E.id }); await D.next('package-sent'); ok(true, 'package posted while friend is away');
+D.send({ t: 'package', to: E.id }); ok((await D.next('package-fail')).why === 'already', 'one package per friend per day');
+const E2 = player(E.id); await E2.open; E2.send({ t: 'hello', friends: [D.id] });
+const mail = await E2.next('mail'); ok(mail.items.length === 1 && mail.items[0].kind === 'package' && mail.items[0].from === D.id, 'package waits for the friend');
+E2.send({ t: 'ack', mid: mail.items[0].mid });
+E2.send({ t: 'thanks', to: D.id }); await E2.next('thanks-sent');
+const th = await D.next('mail'); ok(th.items.some(i => i.kind === 'thanks' && i.from === E.id), 'thank-you reaches the sender live');
+for (const i of th.items) D.send({ t: 'ack', mid: i.mid });
+E2.ws.close(); await D.next('online');
+const E3 = player(E.id); await E3.open; E3.send({ t: 'hello', friends: [D.id] });
+await E3.none('mail', 600); ok(true, 'acked mail is gone');
+for (const p of [D, E3]) p.ws.close();
+
 // rate limit
 let fails = 0; for (let i = 0; i < 8; i++) C.send({ t: 'knock', code: String(200000 + i) });
 for (let i = 0; i < 8; i++) { const r = await C.next('knock-fail'); if (r.why === 'slow down') fails++; }

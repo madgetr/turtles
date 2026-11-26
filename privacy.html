@@ -25,10 +25,14 @@ This information stays on the device and we cannot see it, except for the parts 
 Deleting the app (or clearing the browser's data for the web version) deletes it.</p>
 
 <h2 id="friends">Visiting friends (optional)</h2>
-<p>Players can visit each other's yards and give turtles to friends. Nothing is shared unless a player uses this, and every visit needs a "yes" from the player whose yard it is.</p>
+<p>Players can visit each other's yards, give turtles to friends, and send each friend one care package a day (a surprise box of stars and sometimes a collectable).
+Nothing is shared unless a player uses this, and every visit needs a "yes" from the player whose yard it is.</p>
 <ul>
-  <li><b>How it works:</b> the game connects to a small relay server (run on Cloudflare) that passes messages between the two games. The server does not save them.</li>
+  <li><b>How it works:</b> the game connects to a small relay server (run on Cloudflare) that passes messages between the two games. Visits and gifts are passed straight through and not saved.</li>
   <li><b>What is sent:</b> a random code the game makes for the device (not linked to who you are), and, only during a visit or gift the player agreed to, the yard being visited (its name, its turtles and their names, and the yard layout) or the one turtle being given.</li>
+  <li><b>What the server keeps:</b> only what care packages need. Each game's list of friend codes (random codes, no names), so the server knows who may send to whom.
+  It is forgotten after 90 days without playing. Care packages wait in a mailbox for up to 7 days; they hold only which code sent them and when (what's inside is decided by the game that opens it).
+  A record of who sent a package to whom today is kept for 2 days, to allow one package a day.</li>
   <li><b>What is not sent:</b> no names of people, no messages or chat, no photos, no location. The names players give their friends stay on their own device.</li>
   <li><b>Network data:</b> like any internet connection, the relay sees the device's IP address while it is connected. It is used only to deliver messages and to stop people guessing visit codes, and is not stored.</li>
 </ul>
@@ -50,7 +54,7 @@ permission that Android web-based apps include. The internet is only used for th
 
 <h2>Children</h2>
 <p>Turtle Yard is designed for children and families and complies with the Google Play Families Policy.
-We do not keep any information about players, so there is nothing for us to share, sell or delete. Parents can remove friends
+We do not keep any information that identifies a player. The only stored data is the random friend codes and care packages described above, which are deleted automatically. Parents can remove friends
 inside the game (👫 Friends, then ✕), or simply not use the Friends feature.</p>
 
 <h2>Changes</h2>

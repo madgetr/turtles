@@ -71,8 +71,9 @@ Gentle sounds, cozy day and night, and a yard that keeps growing with you. Start
 - **Data safety** (before the Friends feature is switched on): *Does your app collect or share any of the required user data types?* → **No**.
 - **Data safety** (once the Friends relay is live; check these answers yourself against Google's current form):
   - Collects data: **Yes**. **Device or other IDs** (the random device code) and **Other user-generated content** (yard and turtle names in a visit or gift).
-  - For each: collected, **not shared** (transfers a player starts to another player don't count as sharing), **processed ephemerally**, **optional** (only if you use Friends), purpose **App functionality**.
-  - Encrypted in transit: **Yes** (wss://). Users can request deletion: nothing is stored, so not applicable. No accounts.
+  - Device or other IDs: collected, **not shared**, **not** processed ephemerally (care packages keep friend-code lists up to 90 days and mailbox entries up to 7 days), **optional** (only if you use Friends), purpose **App functionality**.
+  - Other user-generated content: collected, **not shared** (transfers a player starts to another player don't count as sharing), **processed ephemerally**, **optional**, purpose **App functionality**.
+  - Encrypted in transit: **Yes** (wss://). Deletion: stored data is deleted automatically (packages after 7 days, friend lists after 90 days without playing). No accounts.
 - **Government apps / financial features / health**: No.
 - **News app**: No.
 

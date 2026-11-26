@@ -1970,7 +1970,7 @@ const ITEMS = {};
 for (const s of SETS) for (const [id, icon, name, fact, rar] of s.items) ITEMS[id] = { id, icon, name, fact, rar, set: s.k };
 const RARITY = { 1: 'Common', 2: 'Uncommon', 3: 'Rare' };
 const DROP_EVERY = 3 * 3600e3, MAX_DROPS = 3, MILESTONES = { 7: 50, 30: 200, 100: 500 };
-let loot = { last: 0, treasures: [], found: {}, sets: [], visits: 0, day: '', gift: null, jobs: null, powers: {}, boostUntil: 0 };
+let loot = { last: 0, treasures: [], found: {}, sets: [], visits: 0, day: '', gift: null, jobs: null, powers: {}, boostUntil: 0, parcels: [], mailSeen: [] };
 let pendingReward = null;
 
 // pick a find: commons are likelier; things you don't have yet get a little boost
@@ -2061,6 +2061,15 @@ function drawLoot(time, v) {
     const gs = Math.max(34, 24 / cam.z), hop = Math.abs(Math.sin(time * 3)) * gs * 0.2;
     c.fillStyle = '#0003'; c.beginPath(); c.ellipse(g.x, g.y + gs * 0.35, gs * 0.45 * (1 - hop / gs), gs * 0.15, 0, 0, 7); c.fill();
     drawEmoji(c, '🎁', g.x, g.y - hop, gs);
+  }
+  for (const pc of loot.parcels) { // care packages from friends, with who sent them
+    if (pc.x === undefined) placeParcel(pc);
+    if (!inView(pc, 60, v)) continue;
+    const gs = Math.max(34, 24 / cam.z), hop = Math.abs(Math.sin(time * 2.6 + pc.x)) * gs * 0.15;
+    c.fillStyle = '#0003'; c.beginPath(); c.ellipse(pc.x, pc.y + gs * 0.35, gs * 0.45 * (1 - hop / gs), gs * 0.15, 0, 0, 7); c.fill();
+    drawEmoji(c, '📦', pc.x, pc.y - hop, gs);
+    const sp = textSprite(`from ${pc.name}`, '700 24px system-ui, sans-serif', '#fff', '#0009', 6), k = Math.max(11, 9 / cam.z) / 24; // one sprite, scaled with the zoom
+    c.drawImage(sp.cv, pc.x - sp.w * k / 2, pc.y + gs * 0.72 - sp.h * k / 2, sp.w * k, sp.h * k);
   }
 }
 
@@ -2332,7 +2341,7 @@ function switchYard(j) {
   const y = yards[j];
   setYardState(y); resetYardRuntime(); applyYard(); clampCam();
   syncCrabs(); ensurePlots();
-  for (const p of [...loot.treasures, ...(loot.gift ? [loot.gift] : [])]) keepInYard(p); // finds and gifts travel with you
+  for (const p of [...loot.treasures, ...(loot.gift ? [loot.gift] : []), ...loot.parcels.filter(p => p.x !== undefined)]) keepInYard(p); // finds, gifts and parcels travel with you
   for (const t of turtles) { use(t); resetFeet(); }
   use(sel);
   graceT = GRACE_SECS;
@@ -3146,6 +3155,8 @@ function tap(p) {
   const tr = loot.treasures.find(t => dist(t, p) < grab);
   if (tr) return collectTreasure(tr);
   if (loot.gift && dist(loot.gift, p) < grab + 6) return openGift();
+  const pc = loot.parcels.find(q => q.x !== undefined && dist(q, p) < grab + 6);
+  if (pc) return openParcel(pc);
   if (p.x < 0 || p.y < 0 || p.x > YW || p.y > YH) { if (isPicked() && turtles.length > 1) deselect(); return; }
   const hitT = turtles.filter(t => t.releasing === undefined && dist(p, t) < t.S * 1.2 + 8 / cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0];
   if (hitT && mode === 'clean' && hitT.mud > 0) return wash(hitT);
@@ -3501,7 +3512,7 @@ function addFriend(id, name) {
 }
 
 // ----- connection -----
-const net = { ws: null, up: false, tries: 0, timer: 0, online: new Set(), code: null, codeExp: 0, guests: new Set(), knocking: null, gift: null };
+const net = { ws: null, up: false, tries: 0, timer: 0, online: new Set(), code: null, codeExp: 0, guests: new Set(), knocking: null, gift: null, sending: null };
 let visit = null; // looking at a friend's yard: { host, pending, t0, home (your packed yard), picked, yi, groundStr }
 const friendsEl = document.getElementById('friends'), friendsBtn = document.getElementById('friends-btn');
 const netWanted = () => !!RELAY_URL && !document.hidden && (friends.length > 0 || !friendsEl.hidden || !!net.code || net.guests.size > 0 || !!visit || !!net.knocking);
@@ -3511,11 +3522,11 @@ function netStart() {
   let ws;
   try { ws = new WebSocket(`${RELAY_URL}/ws?id=${deviceId()}`); } catch { return netRetry(); }
   net.ws = ws;
-  ws.onopen = () => { if (net.ws !== ws) return; net.up = true; net.tries = 0; netHello(); renderFriends(); };
+  ws.onopen = () => { if (net.ws !== ws) return; net.up = true; net.tries = 0; netHello(); flushThanks(); renderFriends(); };
   ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } netOn(m); };
   ws.onclose = () => {
     if (net.ws !== ws) return;
-    net.ws = null; net.up = false; net.online.clear(); net.code = null; net.knocking = null; net.gift = null;
+    net.ws = null; net.up = false; net.online.clear(); net.code = null; net.knocking = null; net.gift = null; net.sending = null;
     if (net.guests.size) { net.guests.clear(); say('👋 Your visitors had to go (the connection dropped)', 3000); }
     if (visit) goHome('📶 The connection dropped, so you came home');
     renderFriends(); renderVisitBar(); renderFriendPill();
@@ -3542,6 +3553,16 @@ function netOn(m) {
     case 'left': onLeft(m.from); break;
     case 'relay': if (m.data && typeof m.data === 'object') onRelay(m.from, m.data); break;
     case 'relay-fail': if (net.gift?.to === m.to) { net.gift = null; say(`${friendName(m.to)} isn't online right now`, 3000); } break;
+    case 'mail': onMail(m.items); break;
+    case 'package-sent': case 'package-fail': {
+      const f = friendOf(m.to); net.sending = null;
+      if (m.t === 'package-sent' || m.why === 'already') { if (f) { f.sent = new Date().toDateString(); saveFriends(); } }
+      if (m.t === 'package-sent') { snd.play('job'); say(`📦 Care package on its way to ${friendName(m.to)}!`, 3000); }
+      else say(m.why === 'already' ? `📦 You already sent ${friendName(m.to)} a package today` : m.why === 'full' ? `📬 ${friendName(m.to)}'s mailbox is full. Try tomorrow`
+        : `📦 ${friendName(m.to)} needs to have you as a friend too`, 3500);
+      renderFriends();
+      break;
+    }
   }
 }
 
@@ -3782,6 +3803,63 @@ function onGiftReply(from, d) {
   snd.play('job'); say(`🎁 ${t.name} went to live with ${friendName(from)}! 💚`, 4000);
 }
 
+// ----- care packages: one a day to each friend, waiting in the relay's mailbox if they're away -----
+// The receiver's game picks what's inside when it's opened: stars, and about half the time a find (commons
+// likeliest, finds you don't have yet favoured). Opening one sends the sender a thank-you worth a few stars.
+const THANK_STARS = 5;
+const sentToday = f => f.sent === new Date().toDateString();
+function sendPackage(id) {
+  const f = friendOf(id);
+  if (!f || sentToday(f) || !net.up || net.sending) return;
+  net.sending = id; netSend({ t: 'package', to: id }); renderFriends();
+}
+function onMail(items) {
+  if (!Array.isArray(items)) return;
+  let got = 0;
+  for (const it of items) {
+    if (!Number.isInteger(it?.mid) || typeof it.from !== 'string') continue;
+    netSend({ t: 'ack', mid: it.mid });
+    if (loot.mailSeen.includes(it.mid)) continue; // delivered twice (an ack got lost)
+    loot.mailSeen = [...loot.mailSeen, it.mid].slice(-100);
+    if (it.kind === 'package') { loot.parcels.push({ from: it.from, name: friendName(it.from), mid: it.mid }); got++; }
+    else if (it.kind === 'thanks') { stars += THANK_STARS; say(`💌 ${friendName(it.from)} opened your care package! +${THANK_STARS} ⭐`, 3500); snd.play('star'); }
+  }
+  if (got) { snd.play('gift'); say(got > 1 ? `📦 ${got} care packages arrived! Find them in your yard` : `📦 A care package from ${loot.parcels[loot.parcels.length - 1].name} arrived! Find it in your yard`, 4000); }
+  save();
+}
+function placeParcel(pc) { // somewhere open near the middle of the yard you're in
+  for (let i = 0; i < 20; i++) {
+    const p = { x: YW / 2 + rand(-YW * 0.3, YW * 0.3), y: YH / 2 + rand(-YH * 0.3, YH * 0.3) };
+    if (i < 19 && (inPond(p) || dist(p, bowl) < bowl.r + 30 || objs.some(o => o.kind !== 'deco' && dist(o, p) < hitR(o) + 20))) continue;
+    keepInYard(p); pc.x = p.x; pc.y = p.y; return;
+  }
+}
+function rollPackage() {
+  const r = Math.random(), got = r < 0.05 ? 50 : r < 0.2 ? 30 : Math.round(rand(10, 20));
+  if (Math.random() >= 0.5) return { got, it: null };
+  const q = Math.random(), rar = q < 0.05 ? 3 : q < 0.3 ? 2 : 1; // Common 70%, Uncommon 25%, Rare 5%
+  const pool = Object.values(ITEMS).filter(i => i.rar === rar), w = i => (loot.found[i.id] ? 1 : 3);
+  let x = Math.random() * pool.reduce((a, i) => a + w(i), 0);
+  return { got, it: pool.find(i => (x -= w(i)) <= 0) || pool[0] };
+}
+function openParcel(pc) {
+  loot.parcels = loot.parcels.filter(x => x !== pc);
+  const { got, it } = rollPackage();
+  earn(got, pc.x, pc.y - 30); emit(pc.x, pc.y, 'sparkle', 18); buzz([20, 40, 20]); snd.play('gift');
+  let line = `+${got} ⭐`;
+  if (it) { const isNew = addFind(it.id); line += ` and ${it.icon} ${it.name} · ${RARITY[it.rar]}${isNew ? ' (new!)' : ''}`; }
+  showFind('📦', `Care package from ${pc.name}!`, line, it ? it.fact : 'Send one back from 👫 Friends: you can send each friend one care package a day.');
+  sendThanks(pc.from);
+  save();
+}
+let thanksQ = [];
+try { thanksQ = JSON.parse(localStorage.getItem('turtle-thanks')) || []; } catch { }
+function sendThanks(id) { if (!thanksQ.includes(id)) thanksQ.push(id); flushThanks(); }
+function flushThanks() { // sent when you're online; kept until then
+  if (net.up) { for (const id of thanksQ) netSend({ t: 'thanks', to: id }); thanksQ = []; }
+  localStorage.setItem('turtle-thanks', JSON.stringify(thanksQ));
+}
+
 // ----- the friends sheet -----
 function openFriends(gift = null) {
   if (!RELAY_URL) return say("👫 Friends aren't switched on in this version yet", 3000);
@@ -3794,7 +3872,7 @@ function renderFriends() {
   if (friendsEl.hidden) return;
   if (net.code && Date.now() > net.codeExp) net.code = null;
   friendsEl.querySelector('.sub').textContent = !net.up ? '📶 Connecting to the turtle post office…'
-    : giftTurtle ? `🎁 Pick a friend to give ${giftTurtle.name} to. They need to be online.` : "Visit each other's yards and give turtles as gifts";
+    : giftTurtle ? `🎁 Pick a friend to give ${giftTurtle.name} to. They need to be online.` : "Visit yards, give turtles, and send each friend a 📦 care package every day";
   friendsEl.querySelectorAll('.grp').forEach(g => { g.hidden = !!giftTurtle; });
   const codeEl = friendsEl.querySelector('.code'), openB = friendsEl.querySelector('.open');
   codeEl.hidden = !net.code;
@@ -3806,8 +3884,10 @@ function renderFriends() {
   const list = [...friends].sort((a, b) => net.online.has(b.id) - net.online.has(a.id));
   friendsEl.querySelector('.list').innerHTML = list.length ? list.map(f => {
     const on = net.online.has(f.id), here = net.guests.has(f.id);
-    const act = giftTurtle ? `<button class="act go give" ${on ? '' : 'disabled'}>🎁 Give</button>` : `<button class="act go visit" ${on && net.up && !net.knocking ? '' : 'disabled'}>👀 Visit</button>`;
-    return `<div class="fr" data-id="${esc(f.id)}"><i class="dot ${on ? 'on' : ''}"></i><button class="nm">${esc(f.name)}<small>${here ? 'Visiting you now' : on ? 'Online now' : 'Not online'}</small></button>${act}<button class="x" aria-label="Remove">✕</button></div>`;
+    const sent = sentToday(f);
+    const act = giftTurtle ? `<button class="act go give" ${on ? '' : 'disabled'}>🎁 Give</button>`
+      : `<button class="act pkg ${sent ? 'done' : ''}" ${!sent && net.up && !net.sending ? '' : 'disabled'} aria-label="Send a care package">${sent ? '📦✓' : '📦'}</button><button class="act go visit" ${on && net.up && !net.knocking ? '' : 'disabled'}>👀 Visit</button>`;
+    return `<div class="fr ${giftTurtle ? '' : 'wide'}" data-id="${esc(f.id)}"><i class="dot ${on ? 'on' : ''}"></i><button class="nm">${esc(f.name)}<small>${here ? 'Visiting you now' : on ? 'Online now' : 'Not online'}${sent ? ' · 📦 sent today' : ''}</small></button>${act}<button class="x" aria-label="Remove">✕</button></div>`;
   }).join('') : '<div class="empty">No friends yet. Swap visit codes to add one!</div>';
 }
 setInterval(renderFriends, 15e3); // code countdown
@@ -3830,6 +3910,7 @@ friendsEl.querySelector('.list').addEventListener('click', e => {
   const f = friendOf(row.dataset.id); if (!f) return;
   if (e.target.closest('.visit')) return knock({ id: f.id });
   if (e.target.closest('.give')) return sendGift(f.id);
+  if (e.target.closest('.pkg')) return sendPackage(f.id);
   if (e.target.closest('.nm')) return askName('Rename your friend', f.name, n => { f.name = n; saveFriends(); renderVisitBar(); }, 16);
   if (e.target.closest('.x')) return askConfirm(`Remove ${f.name}?`, 'You can add them again any time with a visit code.', 'Remove', () => {
     if (net.guests.has(f.id)) { netSend({ t: 'leave', to: f.id }); net.guests.delete(f.id); renderVisitBar(); }

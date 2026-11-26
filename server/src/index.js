@@ -1,4 +1,5 @@
-// Turtle Yard relay: passes messages between two players' games. It keeps nothing on disk.
+// Turtle Yard relay: passes messages between two games. The only things it keeps are the care-package
+// mailbox (for up to a week) and each game's list of friend codes (so it knows who may send to whom).
 //
 // Every game opens one WebSocket to /ws?id=<random device id>. All sockets live in one Durable Object
 // (the "hub"), using the hibernation API so idle connections cost nothing.
@@ -11,7 +12,11 @@
 //   answer  { to, yes }             host's reply to a knock; yes = the two of you are linked until one leaves
 //   relay   { to, data }            pass data to a linked player or a mutual friend
 //   leave   { to }                  end a link
+//   package { to }                  send today's care package to a friend (one per friend per day, kept up to 7 days)
+//   thanks  { to }                  tell a friend you opened their package (they get a thank-you note)
+//   ack     { mid }                 got this mail; delete it
 //
+// Mail arrives as { t: 'mail', items: [{ mid, kind: 'package' | 'thanks', from, at }] } on hello and as it's sent.
 // Nothing here is chat: the server only carries what the game sends (yard snapshots, turtle moves, gifts).
 
 const CODE_TTL = 10 * 60e3;
@@ -20,6 +25,10 @@ const MAX_MSG = 900_000; // Workers allow 1 MiB per WebSocket message
 const KNOCKS_PER_MIN = 6; // per socket
 const IP_KNOCKS_PER_MIN = 12; // per IP address, so opening many sockets doesn't help guess codes
 const ID_RE = /^[A-Za-z0-9_-]{16,32}$/;
+const MAIL_DAYS = 7, MAX_MAIL = 40; // a full mailbox refuses new packages
+const FRIENDS_KEEP_DAYS = 90; // a game not seen for this long is forgotten
+const DAY = 86400e3;
+const today = () => new Date().toISOString().slice(0, 10); // UTC day: everyone shares one daily limit
 
 export default {
   async fetch(req, env) {
@@ -40,6 +49,14 @@ export class Hub {
   constructor(state) {
     this.state = state;
     this.ipKnocks = new Map(); // ip -> [times] (in memory only; forgetting it after hibernation is fine)
+    this.sql = state.storage.sql;
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS friends (id TEXT PRIMARY KEY, list TEXT NOT NULL, seen INTEGER NOT NULL)`);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS mail (mid INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, to_id TEXT NOT NULL,
+      from_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL)`);
+    // what was sent today, kept after the mail is picked up, so the daily limit holds
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS sent (kind TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, day TEXT NOT NULL,
+      PRIMARY KEY (kind, from_id, to_id, day))`);
+    this.sql.exec(`CREATE INDEX IF NOT EXISTS mail_to ON mail (to_id)`);
   }
 
   async fetch(req) {
@@ -90,6 +107,33 @@ export class Hub {
     }
   }
   onlineFriends(a) { return a.friends.filter(f => this.mutual(a.id, f)); }
+  storedFriends(id) { // a friend list, from the live socket or (if they're away) from storage
+    const s = this.sockOf(id);
+    if (s) return this.info(s).friends;
+    const row = this.sql.exec('SELECT list FROM friends WHERE id = ?', id).toArray()[0];
+    return row ? JSON.parse(row.list) : [];
+  }
+  friendsBothWays(a, b) { return this.storedFriends(a).includes(b) && this.storedFriends(b).includes(a); }
+  sendMail(id) { // push waiting mail to a connected game
+    const s = this.sockOf(id); if (!s) return;
+    const items = this.sql.exec('SELECT mid, kind, from_id AS "from", at FROM mail WHERE to_id = ? ORDER BY mid', id).toArray();
+    if (items.length) this.send(s, { t: 'mail', items });
+  }
+  post(kind, from, to) { // returns null, or why it couldn't be posted
+    const n = this.sql.exec('SELECT COUNT(*) AS n FROM mail WHERE to_id = ?', to).one().n;
+    if (n >= MAX_MAIL) return 'full';
+    const day = today();
+    if (this.sql.exec('SELECT 1 FROM sent WHERE kind = ? AND from_id = ? AND to_id = ? AND day = ?', kind, from, to, day).toArray().length) return 'already';
+    this.sql.exec('INSERT INTO sent (kind, from_id, to_id, day) VALUES (?, ?, ?, ?)', kind, from, to, day);
+    this.sql.exec('INSERT INTO mail (kind, to_id, from_id, day, at) VALUES (?, ?, ?, ?, ?)', kind, to, from, day, Date.now());
+    this.sendMail(to);
+    return null;
+  }
+  tidy() {
+    this.sql.exec('DELETE FROM mail WHERE at < ?', Date.now() - MAIL_DAYS * DAY);
+    this.sql.exec('DELETE FROM friends WHERE seen < ?', Date.now() - FRIENDS_KEEP_DAYS * DAY);
+    this.sql.exec('DELETE FROM sent WHERE day < ?', new Date(Date.now() - 2 * DAY).toISOString().slice(0, 10));
+  }
 
   // ----- messages -----
   async webSocketMessage(ws, raw) {
@@ -100,8 +144,11 @@ export class Hub {
       case 'hello': {
         a.friends = (Array.isArray(m.friends) ? m.friends : []).filter(f => typeof f === 'string' && ID_RE.test(f) && f !== a.id).slice(0, MAX_FRIENDS);
         this.save(ws, a);
+        this.sql.exec('INSERT OR REPLACE INTO friends (id, list, seen) VALUES (?, ?, ?)', a.id, JSON.stringify(a.friends), Date.now());
         this.send(ws, { t: 'online', ids: this.onlineFriends(a) });
         this.presence(a.id);
+        this.tidy();
+        this.sendMail(a.id);
         break;
       }
       case 'open': {
@@ -135,6 +182,18 @@ export class Hub {
         if (typeof m.to !== 'string' || !(this.linked(a.id, m.to) || this.mutual(a.id, m.to))) return this.send(ws, { t: 'relay-fail', to: m.to });
         const v = this.sockOf(m.to);
         if (v) this.send(v, { t: 'relay', from: a.id, data: m.data });
+        break;
+      }
+      case 'package':
+      case 'thanks': {
+        if (typeof m.to !== 'string' || !ID_RE.test(m.to) || m.to === a.id) return;
+        if (!this.friendsBothWays(a.id, m.to)) return this.send(ws, { t: `${m.t}-fail`, to: m.to, why: 'not friends' });
+        const why = this.post(m.t, a.id, m.to);
+        this.send(ws, why ? { t: `${m.t}-fail`, to: m.to, why } : { t: `${m.t}-sent`, to: m.to });
+        break;
+      }
+      case 'ack': {
+        if (Number.isInteger(m.mid)) this.sql.exec('DELETE FROM mail WHERE mid = ? AND to_id = ?', m.mid, a.id);
         break;
       }
       case 'leave': {
