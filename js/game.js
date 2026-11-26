@@ -732,7 +732,7 @@ function nudgeBall() {
   st.happy = clamp(st.happy + joy, 0, 100); T.chub = clamp(T.chub - 0.006, 0, 1); st.energy = clamp(st.energy - 0.5, 0, 100);
   emit(T.x, T.y - S, 'heart');
   if (T.playStarCool <= 0) { earn(1, T.x, T.y - S * 2); T.playStarCool = 4; }
-  job('play');
+  job('play', T.name);
   buzz(8);
 }
 
@@ -752,7 +752,7 @@ function think(dt) {
     T.a = Math.atan2(sl.to.y - sl.from.y, sl.to.x - sl.from.x); T.v = 140; T.headExt = 1;
     T.tailT += dt * 8;
     if (sl.t >= 1) {
-      T.sliding = null; T.v = 30; actStar(2); T.chub = clamp(T.chub - 0.02, 0, 1); st.energy = clamp(st.energy - 1.5, 0, 100);
+      T.sliding = null; T.v = 30; actStar(2); job('slide'); T.chub = clamp(T.chub - 0.02, 0, 1); st.energy = clamp(st.energy - 1.5, 0, 100);
       st.happy = clamp(st.happy + 6 + T.traits.playful * 6, 0, 100); emit(T.x, T.y - S, 'heart', 2);
       if (inPond(T)) for (let i = 0; i < 12; i++) emit(T.x, T.y, 'drop');
     }
@@ -780,7 +780,8 @@ function think(dt) {
       grow(GROW_PER_BITE * (f.type === 'berry' ? 1.3 : 1) * (0.5 + st.happy / 100));
       if (f.bites <= 0) {
         T.diet.push(f.type); if (T.diet.length > 6) T.diet.shift();
-        if (f.type === 'berry') job('berry');
+        if (f.type === 'berry') job('berry', T.name);
+        job('eat'); if (f.slot !== undefined) job('harvest');
         if (f.type === 'berry') T.chub = clamp(T.chub + 0.05, 0, 1);
         foods = foods.filter(x => x !== f); T.eat = null; T.gut.push(rand(15, 28)); if (f.slot !== undefined && plots[f.slot]) plots[f.slot].t0 = Date.now(); }
     }
@@ -2136,40 +2137,72 @@ function usePower(k) {
   const msg = P.run();
   emit(cam.x, cam.y, 'sparkle', 24); snd.play('gift'); buzz([20, 40, 20]);
   say(`${P.icon} ${P.name}! ${msg}`, 3000);
-  save(); renderPowers();
+  job('power'); save(); renderPowers();
 }
 function renderPowers() { } // charge is drawn on each set decoration in the yard (see drawDeco)
 
-// ---------- daily jobs: three small tasks a day for bonus stars ----------
+// ---------- daily jobs: five tasks a day for bonus stars ----------
+// g = group (at most one job per group a day), on = the event it counts (default: its own k),
+// d = count each turtle only once, state = checked every second instead of counted, ok = only offered when possible.
+// n can depend on c, the number of turtles in the yard.
 const JOBS = [
-  { k: 'pet', n: 5, text: n => `Pet your turtles ${n} times` },
-  { k: 'petOne', n: 3, text: (n, w) => `Pet ${w} ${n} times` },
-  { k: 'snack', n: 6, text: n => `Drop ${n} snacks` },
-  { k: 'berry', n: 2, text: n => `Feed someone ${n} berries 🍓` },
-  { k: 'scoop', n: 4, text: n => `Scoop ${n} poops` },
-  { k: 'water', n: 1, text: () => 'Give fresh water 💧' },
-  { k: 'play', n: 12, text: n => `Turtles nudge the toy ${n} times` },
-  { k: 'call', n: 3, text: n => `Call a turtle over ${n} times` },
-  { k: 'treasure', n: 1, text: () => 'Find a treasure ✨', ok: () => loot.treasures.length > 0 },
-  { k: 'wash', n: 1, text: () => 'Wash a muddy turtle 🛁', ok: () => !!objOf('mud') },
+  { k: 'pet', g: 'pet', n: () => 15, text: n => `Pet your turtles ${n} times` },
+  { k: 'petOne', g: 'pet', n: () => 6, text: (n, w) => `Pet ${w} ${n} times` },
+  { k: 'petAll', g: 'pet', on: 'pet', d: true, n: c => c, text: n => `Pet all ${n} of your turtles 💕`, ok: c => c >= 2 },
+  { k: 'snack', g: 'food', n: () => 12, text: n => `Drop ${n} snacks` },
+  { k: 'berryAll', g: 'food', on: 'berry', d: true, n: c => Math.min(c, 4), text: n => `Feed berries 🍓 to ${n} different turtles`, ok: c => c >= 2 },
+  { k: 'berry', g: 'food', n: () => 4, text: n => `Turtles finish ${n} berries 🍓`, ok: c => c < 2 },
+  { k: 'eat', g: 'food', n: c => Math.min(6 + c * 2, 14), text: n => `Turtles finish ${n} meals` },
+  { k: 'harvest', g: 'food', n: () => 4, text: n => `Turtles eat ${n} things from the garden 🥬`, ok: () => up.garden && !!objOf('garden') },
+  { k: 'scoop', g: 'clean', n: c => Math.min(4 + c * 2, 12), text: n => `Scoop ${n} poops` },
+  { k: 'wash', g: 'clean', n: () => 2, text: n => `Wash ${n} muddy turtles 🛁`, ok: () => !!objOf('mud') },
+  { k: 'play', g: 'play', n: () => 25, text: n => `Turtles nudge the toy ${n} times` },
+  { k: 'playAll', g: 'play', on: 'play', d: true, n: c => Math.min(c, 4), text: n => `${n} different turtles play with the toy`, ok: c => c >= 2 },
+  { k: 'slide', g: 'play', n: () => 3, text: n => `Turtles go down the slide ${n} times 🛝`, ok: () => !!objOf('slide') },
+  { k: 'call', g: 'call', n: () => 5, text: n => `Call a turtle over ${n} times` },
+  { k: 'treasure', g: 'treasure', n: () => 1, text: () => 'Find a treasure ✨', ok: () => loot.treasures.length > 0 },
+  { k: 'happyAll', g: 'mood', state: t => t.st.happy >= 80, n: () => 1, text: () => 'Get every turtle to 80+ happiness at once 😊' },
+  { k: 'fullAll', g: 'mood', state: t => t.st.hunger >= 85, n: () => 1, text: () => 'Get every turtle full (85+ food) at once 🍽️' },
+  { k: 'paint', g: 'yard', n: () => 40, text: n => `Paint ${n} squares of ground 🖌️`, ok: () => up.brushes.some(b => b !== 'sand') },
+  { k: 'power', g: 'yard', n: () => 1, text: () => 'Use a set decoration\'s power ✨', ok: () => SETS.some(s => powerHere(s.k)) },
+  { k: 'package', g: 'yard', n: () => 1, text: () => 'Send a friend a care package 📦', ok: () => friends.length > 0 },
 ];
-const JOB_STARS = 15, JOBS_BONUS = 25;
-function newJobs() {
-  const pool = JOBS.filter(j => !j.ok || j.ok()), list = [];
-  while (list.length < 3 && pool.length) {
+const JOB_COUNT = 5, JOB_STARS = 20, JOBS_BONUS = 50;
+function newJobs(list = []) { // pass today's jobs to top them up instead of starting over
+  const c = turtles.length, groups = new Set(list.map(j => JOBS.find(x => x.k === j.k)?.g || j.k));
+  const pool = JOBS.filter(j => (!j.ok || j.ok(c)) && !groups.has(j.g));
+  const bonus = list.length > 0 && !!loot.jobs?.bonus; // already got today's bonus: topping up doesn't pay it twice
+  while (list.length < JOB_COUNT && pool.length) {
     const j = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-    if ((j.k === 'pet' || j.k === 'petOne') && list.some(x => x.k.startsWith('pet'))) continue; // one petting job a day
-    const who = j.k === 'petOne' ? turtles[Math.floor(Math.random() * turtles.length)].name : null;
-    list.push({ k: j.k, n: j.n, have: 0, who, text: j.text(j.n, who) });
+    if (groups.has(j.g)) continue; // one job of each kind a day
+    groups.add(j.g);
+    const who = j.k === 'petOne' ? turtles[Math.floor(Math.random() * turtles.length)].name : null, n = Math.max(1, j.n(c));
+    list.push({ k: j.k, on: j.on, d: j.d, n, have: 0, who, seen: j.d ? [] : undefined, text: j.text(n, who) });
   }
-  loot.jobs = { list, bonus: false };
+  loot.jobs = { list, bonus };
+}
+let jobCheckT = 0;
+function jobTick(dt) { // the "everyone at once" jobs: looked at once a second
+  if ((jobCheckT -= dt) > 0 || !loot.jobs) return;
+  jobCheckT = 1;
+  const live = turtles.filter(t => !t.dying);
+  if (!live.length) return;
+  for (const j of loot.jobs.list) {
+    const J = JOBS.find(x => x.k === j.k);
+    if (J?.state && j.have < j.n && live.every(J.state)) job(j.k);
+  }
 }
 function job(k, who = null, amount = 1) {
   if (!loot.jobs) return;
   for (const j of loot.jobs.list) {
     if (j.have >= j.n) continue;
-    if (j.k !== k && !(k === 'pet' && j.k === 'petOne' && j.who === who)) continue;
-    j.have = Math.min(j.n, j.have + amount);
+    if ((j.on || j.k) !== k && !(k === 'pet' && j.k === 'petOne' && j.who === who)) continue;
+    if (j.d) { // each turtle counts once
+      j.seen ??= [];
+      if (!who || j.seen.includes(who)) continue;
+      j.seen.push(who);
+    }
+    j.have = Math.min(j.n, j.have + (j.d ? 1 : amount));
     if (j.have >= j.n) { earn(JOB_STARS, cam.x, cam.y); snd.play('job'); say(`📋 Job done: ${j.text}! +${JOB_STARS} ⭐`, 3000); }
   }
   if (!loot.jobs.bonus && loot.jobs.list.every(j => j.have >= j.n)) {
@@ -2305,7 +2338,7 @@ function endPaint() {
 }
 function paintAt(p) {
   const rad = brush - 1, c0 = Math.floor(p.x / TILE), r0 = Math.floor(p.y / TILE);
-  let changed = false;
+  let changed = false, painted = 0;
   for (let dc = -rad; dc <= rad; dc++) for (let dr = -rad; dr <= rad; dr++) {
     if (dc * dc + dr * dr > rad * rad + rad) continue; // roundish brush
     const c = c0 + dc, r = r0 + dr;
@@ -2313,12 +2346,13 @@ function paintAt(p) {
     const k = `${c},${r}`, cur = ground[k] || 'sand';
     if (cur === paintType) continue;
     if (!hasBrush(paintType)) { if (!paintBroke) { say(`🔒 Unlock ${GROUND[paintType].name} first`, 2500); paintBroke = true; } return; }
-    if (paintType === 'sand') delete ground[k]; else ground[k] = paintType;
+    if (paintType === 'sand') delete ground[k]; else { ground[k] = paintType; painted++; }
     for (const [dc2, dr2] of [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) gDirty.add(`${Math.floor((c + dc2) / CHUNK)},${Math.floor((r + dr2) / CHUNK)}`); changed = true;
   }
   if (changed) {
     if (paintType === 'water' || waterTiles.length) waterTiles = Object.keys(ground).filter(k => ground[k] === 'water').map(k => { const [c, r] = k.split(',').map(Number); return { x: (c + 0.5) * TILE, y: (r + 0.5) * TILE }; });
     snd.play('drop'); renderPaintbar();
+    if (painted) job('paint', null, painted);
   }
 }
 paintbar.querySelector('.sw').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; paintType = b.dataset.k; renderPaintbar(); snd.play('click'); });
@@ -3021,8 +3055,9 @@ function earn(n, x, y) {
   parts.push({ x, y, kind: 'star', text: `+${n}⭐`, t: 0, life: 1.3, vx: 0, vy: -28 });
   starsEl.classList.remove('bump'); void starsEl.offsetWidth; starsEl.classList.add('bump');
 }
-function dailyBonus() { // first visit of a new day: a mystery gift and three new jobs
+function dailyBonus() { // first visit of a new day: a mystery gift and five new jobs
   const today = new Date().toDateString();
+  if (loot.day === today && loot.jobs && loot.jobs.list.length < JOB_COUNT) { newJobs(loot.jobs.list); renderPills(); } // saves from when there were 3 a day
   if (loot.day === today) return;
   loot.day = today; lastDaily = today; loot.visits++;
   loot.gift = { x: clamp(cam.x + rand(-60, 60), 60, YW - 60), y: clamp(cam.y + rand(-30, 50), 60, YH - 60) };
@@ -3841,7 +3876,7 @@ function pkgSizeLine() { // "Your game is worth ⭐ 3,240, so you send big boxes
 function sendPackage(id) {
   const f = friendOf(id);
   if (!f || sentToday(f) || !net.up || net.sending) return;
-  net.sending = id; netSend({ t: 'package', to: id, tier: myPkgTier() }); renderFriends();
+  net.sending = id; netSend({ t: 'package', to: id, tier: myPkgTier() }); job('package'); renderFriends();
 }
 function onMail(items) {
   if (!Array.isArray(items)) return;
@@ -4054,7 +4089,7 @@ function frameBody(now) {
   poops.forEach(p => p.born += dt);
   marker = isPicked() ? sel.userTarget : null;
   const nowMs = Date.now(), dk = darkness();
-  if (!visit) { gardenTick(nowMs); lootTick(nowMs); updateCrabs(dt); }
+  if (!visit) { gardenTick(nowMs); lootTick(nowMs); jobTick(dt); updateCrabs(dt); }
   hostTick(now);
   if (objOf('garden')) for (const f of foods) if (f.slot !== undefined) { const sp = slotPos(f.slot); f.x = sp.x; f.y = sp.y; }
   updateFlies(dt, dk, v);
