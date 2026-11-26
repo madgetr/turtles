@@ -3587,6 +3587,7 @@ const isLocalDev = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !isNa
 // local testing only: ?relay=ws://127.0.0.1:8787 (never on the real site, so a link can't point a game at another server)
 const RELAY_URL = (isLocalDev && (new URLSearchParams(location.search).get('relay') || localStorage.getItem('turtle-relay'))) || RELAY_DEFAULT;
 if (isLocalDev && new URLSearchParams(location.search).get('relay')) localStorage.setItem('turtle-relay', new URLSearchParams(location.search).get('relay'));
+const INVITE_KEY = 'turtle-invite', INVITE_BASE = 'https://madgetr.github.io/turtles/';
 const ID_KEY = 'turtle-device-id', FRIENDS_KEY = 'turtle-friends', MAX_FRIENDS = 40, MAX_GUESTS = 3, CODE_MIN = 10;
 function deviceId() { // random, made on this device, never tied to a person; not part of backups, so a restored game is a new device
   let id = localStorage.getItem(ID_KEY);
@@ -3612,14 +3613,14 @@ function addFriend(id, name) {
 const net = { ws: null, up: false, tries: 0, timer: 0, online: new Set(), code: null, codeExp: 0, guests: new Set(), knocking: null, gift: null, sending: null };
 let visit = null; // looking at a friend's yard: { host, pending, t0, home (your packed yard), picked, yi, groundStr }
 const friendsEl = document.getElementById('friends'), friendsBtn = document.getElementById('friends-btn');
-const netWanted = () => !!RELAY_URL && !document.hidden && (friends.length > 0 || !friendsEl.hidden || !!net.code || net.guests.size > 0 || !!visit || !!net.knocking);
+const netWanted = () => !!RELAY_URL && !document.hidden && (friends.length > 0 || !!localStorage.getItem(INVITE_KEY) || !friendsEl.hidden || !!net.code || net.guests.size > 0 || !!visit || !!net.knocking);
 function netStart() {
   if (!netWanted() || net.ws) return;
   clearTimeout(net.timer);
   let ws;
   try { ws = new WebSocket(`${RELAY_URL}/ws?id=${deviceId()}`); } catch { return netRetry(); }
   net.ws = ws;
-  ws.onopen = () => { if (net.ws !== ws) return; net.up = true; net.tries = 0; netHello(); flushThanks(); renderFriends(); };
+  ws.onopen = () => { if (net.ws !== ws) return; net.up = true; net.tries = 0; netHello(); flushThanks(); redeemInvite(); renderFriends(); };
   ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } netOn(m); };
   ws.onclose = () => {
     if (net.ws !== ws) return;
@@ -3651,6 +3652,18 @@ function netOn(m) {
     case 'relay': if (m.data && typeof m.data === 'object') onRelay(m.from, m.data); break;
     case 'relay-fail': if (net.gift?.to === m.to) { net.gift = null; say(`${friendName(m.to)} isn't online right now`, 3000); } break;
     case 'mail': onMail(m.items); break;
+    case 'invite': shareInvite(m.token); break;
+    case 'redeemed': {
+      localStorage.removeItem(INVITE_KEY);
+      if (friendOf(m.owner)) { say(`👫 You're already friends with ${friendName(m.owner)}`, 3000); break; }
+      askName('Who sent you this invite? 👫', 'Friend', n => { addFriend(m.owner, n); say(`👫 Sent ${n} a friend request. You'll be friends once they say yes!`, 4000); }, 16);
+      break;
+    }
+    case 'redeem-fail':
+      if (m.why !== 'slow down') localStorage.removeItem(INVITE_KEY);
+      say(m.why === 'own' ? "🔗 That's your own invite link! Send it to a friend" : m.why === 'expired' ? '🔗 That invite link has expired. Ask your friend for a new one'
+        : m.why === 'full' ? "📬 Your friend's mailbox is full. Try again tomorrow" : '🐢 Slow down! Try again in a minute', 4000);
+      break;
     case 'package-sent': case 'package-fail': {
       const f = friendOf(m.to); net.sending = null;
       if (m.t === 'package-sent' || m.why === 'already') { if (f) { f.sent = new Date().toDateString(); saveFriends(); } }
@@ -3942,6 +3955,7 @@ function onMail(items) {
     if (loot.mailSeen.includes(it.mid)) continue; // delivered twice (an ack got lost)
     loot.mailSeen = [...loot.mailSeen, it.mid].slice(-100);
     if (it.kind === 'package') { loot.parcels.push({ from: it.from, name: friendName(it.from), mid: it.mid, tier: clamp(it.tier | 0, 0, PKG.length - 1) }); got++; }
+    else if (it.kind === 'friendreq') { if (!friendOf(it.from) && !friendReqs.includes(it.from)) { friendReqs.push(it.from); saveReqs(); } askFriendReqs(); }
     else if (it.kind === 'thanks') { stars += THANK_STARS; say(`💌 ${friendName(it.from)} opened your care package! +${THANK_STARS} ⭐`, 3500); snd.play('star'); }
   }
   if (got) { snd.play('gift'); say(got > 1 ? `📦 ${got} care packages arrived! Find them in your yard` : `📦 A care package from ${loot.parcels[loot.parcels.length - 1].name} arrived! Find it in your yard`, 4000); }
@@ -4017,6 +4031,57 @@ function flushThanks() { // sent when you're online; kept until then
   localStorage.setItem('turtle-thanks', JSON.stringify(thanksQ));
 }
 
+// ----- invite links: https://madgetr.github.io/turtles/?invite=<token> (or turtleyard://invite/<token> in the app) -----
+// The token comes from the relay (7 days, one live link each). Whoever opens it adds you; you get a friend request to approve.
+// friend requests wait on this device until answered (the mail itself is already picked up)
+let friendReqs = [], askingReq = null;
+try { friendReqs = JSON.parse(localStorage.getItem('turtle-friend-reqs')) || []; } catch { }
+const saveReqs = () => localStorage.setItem('turtle-friend-reqs', JSON.stringify(friendReqs));
+function askFriendReqs() {
+  friendReqs = friendReqs.filter(id => !friendOf(id));
+  const from = friendReqs[0];
+  if (!from || askingReq) return;
+  askingReq = from;
+  const done = () => { friendReqs = friendReqs.filter(x => x !== from); saveReqs(); askingReq = null; askFriendReqs(); };
+  askNet('👫 Someone used your invite link!', 'Only add them if you know who it is. Friends can visit (you always say yes first) and send care packages.',
+    'Add friend', 'No thanks', () => askName('Who is this friend? 👫', 'Friend', n => { addFriend(from, n); snd.play('job'); say(`👫 ${n} is now your friend!`, 3000); done(); }, 16), done);
+}
+setTimeout(askFriendReqs, 1500); // any left from last time
+function takeInvite(url) { // remember an invite from a link; it's used as soon as we're online
+  const m = String(url || '').match(/(?:[?&]invite=|invite\/)([A-Za-z0-9_-]{8,40})/);
+  if (!m) return false;
+  localStorage.setItem(INVITE_KEY, m[1]);
+  if (net.up) redeemInvite(); else netStart();
+  return true;
+}
+function redeemInvite() { const t = localStorage.getItem(INVITE_KEY); if (t && net.up) netSend({ t: 'redeem', token: t }); }
+async function shareInvite(token) {
+  const url = `${INVITE_BASE}?invite=${token}`, text = "Be my friend in Turtle Yard! 🐢 Tap to add me (works for 7 days):";
+  try {
+    if (isNativeApp) { await window.Capacitor.Plugins.Share.share({ title: 'Turtle Yard invite', text, url, dialogTitle: 'Send your invite link' }); return; }
+    if (navigator.share) { await navigator.share({ title: 'Turtle Yard invite', text, url }); return; }
+  } catch (e) { if (/cancel|abort/i.test(e?.message || e?.name || '')) return; }
+  try { await navigator.clipboard.writeText(`${text} ${url}`); say('🔗 Invite link copied! Paste it in a message to your friend', 3500); }
+  catch { askConfirm('Your invite link', url, 'OK', () => { }); }
+}
+{ // opened from an invite link?
+  const q = new URLSearchParams(location.search), inv = q.get('invite');
+  if (inv) {
+    history.replaceState(null, '', location.pathname + (q.get('relay') ? `?relay=${encodeURIComponent(q.get('relay'))}` : ''));
+    if (/Android/i.test(navigator.userAgent) && !isNativeApp && !q.has('web')) { // offer the app first: a web game is a separate player
+      const back = `${location.origin}${location.pathname}?web=1&invite=${inv}`;
+      askNet('🐢 Open in the Turtle Yard app?', 'If you play in the app, open the invite there so the friend joins your real game.', 'Open the app', 'Use this page',
+        () => { location.href = `intent://invite/${inv}#Intent;scheme=turtleyard;package=com.madgetr.petturtle;S.browser_fallback_url=${encodeURIComponent(back)};end`; },
+        () => takeInvite(`?invite=${inv}`));
+    } else takeInvite(`?invite=${inv}`);
+  }
+  if (isNativeApp && window.Capacitor.Plugins.App) { // the app opened (or was brought back) by a turtleyard:// link
+    const A = window.Capacitor.Plugins.App;
+    A.addListener('appUrlOpen', e => takeInvite(e.url));
+    A.getLaunchUrl?.().then(r => r?.url && takeInvite(r.url)).catch(() => { });
+  }
+}
+
 // ----- the friends sheet -----
 function openFriends(gift = null) {
   if (!RELAY_URL) return say("👫 Friends aren't switched on in this version yet", 3000);
@@ -4036,7 +4101,7 @@ function renderFriends() {
   if (net.code) codeEl.textContent = net.code.replace(/^(\d{3})/, '$1 ');
   openB.textContent = net.code ? `✖ Stop (the code works ${Math.ceil((net.codeExp - Date.now()) / 60e3)} more min)` : '🔑 Get a visit code';
   openB.classList.toggle('go', !net.code);
-  openB.disabled = !net.up;
+  openB.disabled = !net.up; friendsEl.querySelector('.share').disabled = !net.up;
   friendsEl.querySelector('.knock').disabled = !net.up || !!net.knocking;
   const list = [...friends].sort((a, b) => net.online.has(b.id) - net.online.has(a.id));
   friendsEl.querySelector('.list').innerHTML = list.length ? list.map(f => {
@@ -4050,14 +4115,17 @@ function renderFriends() {
 setInterval(renderFriends, 15e3); // code countdown
 const renderFriendPill = () => { friendsBtn.textContent = net.online.size ? `👫 ${net.online.size}` : '👫'; friendsBtn.classList.toggle('ready', net.online.size > 0); };
 friendsBtn.onclick = () => openFriends();
+friendsEl.querySelector('.share').onclick = () => { if (!netSend({ t: 'invite' })) say('📶 Not connected yet. Try again in a moment', 2500); };
 friendsEl.querySelector('.open').onclick = () => {
   if (net.code) { netSend({ t: 'close' }); net.code = null; renderFriends(); }
   else netSend({ t: 'open' });
 };
-friendsEl.querySelector('.in').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); });
+friendsEl.querySelector('.in').addEventListener('input', e => { if (!/invite/.test(e.target.value)) e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); }); // digits, or a pasted invite link
 friendsEl.querySelector('.in').addEventListener('keydown', e => { if (e.key === 'Enter') friendsEl.querySelector('.knock').click(); });
 friendsEl.querySelector('.knock').onclick = () => {
-  const inp = friendsEl.querySelector('.in'), code = inp.value.replace(/\D/g, '');
+  const inp = friendsEl.querySelector('.in');
+  if (/invite/.test(inp.value)) { const ok = takeInvite(inp.value); inp.value = ''; if (!ok) say("🔗 That link didn't look right", 2500); return; }
+  const code = inp.value.replace(/\D/g, '');
   if (code.length !== 6) return say('🔑 Visit codes have 6 numbers', 2500);
   if (code === net.code) return say("🔑 That's your own code! Give it to a friend", 3000);
   inp.value = ''; knock({ code });

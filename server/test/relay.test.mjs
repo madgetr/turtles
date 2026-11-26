@@ -59,6 +59,19 @@ const E3 = player(E.id); await E3.open; E3.send({ t: 'hello', friends: [D.id] })
 await E3.none('mail', 600); ok(true, 'acked mail is gone');
 for (const p of [D, E3]) p.ws.close();
 
+// invite links
+const F = player(rid()), G = player(rid());
+await Promise.all([F.open, G.open]);
+F.send({ t: 'hello', friends: [] }); G.send({ t: 'hello', friends: [] }); await F.next('online'); await G.next('online');
+F.send({ t: 'invite' }); const inv = await F.next('invite'); ok(typeof inv.token === 'string' && inv.token.length >= 12, 'invite token made');
+F.send({ t: 'redeem', token: inv.token }); ok((await F.next('redeem-fail')).why === 'own', "can't redeem your own link");
+G.send({ t: 'redeem', token: 'nope-nope-nope' }); ok((await G.next('redeem-fail')).why === 'expired', 'bad token refused');
+G.send({ t: 'redeem', token: inv.token }); ok((await G.next('redeemed')).owner === F.id, 'redeemer learns who invited them');
+const fr = await F.next('mail'); ok(fr.items.some(i => i.kind === 'friendreq' && i.from === G.id), 'inviter gets a friend request');
+F.send({ t: 'invite' }); await F.next('invite');
+G.send({ t: 'redeem', token: inv.token }); ok((await G.next('redeem-fail')).why === 'expired', 'a new link cancels the old one');
+for (const p of [F, G]) p.ws.close();
+
 // rate limit
 let fails = 0; for (let i = 0; i < 8; i++) C.send({ t: 'knock', code: String(200000 + i) });
 for (let i = 0; i < 8; i++) { const r = await C.next('knock-fail'); if (r.why === 'slow down') fails++; }

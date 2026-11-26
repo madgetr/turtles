@@ -15,6 +15,8 @@
 //   package { to, tier }            send today's care package (tier 0-3 = how big) to a friend (one per friend per day, kept up to 7 days)
 //   thanks  { to }                  tell a friend you opened their package (they get a thank-you note)
 //   ack     { mid }                 got this mail; delete it
+//   invite  {}                      make (or replace) your invite-link token, good for 7 days
+//   redeem  { token }               used a friend's invite link: they get a friend request to approve
 //
 // Mail arrives as { t: 'mail', items: [{ mid, kind: 'package' | 'thanks', from, at }] } on hello and as it's sent.
 // Nothing here is chat: the server only carries what the game sends (yard snapshots, turtle moves, gifts).
@@ -57,6 +59,7 @@ export class Hub {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS sent (kind TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, day TEXT NOT NULL,
       PRIMARY KEY (kind, from_id, to_id, day))`);
     this.sql.exec(`CREATE INDEX IF NOT EXISTS mail_to ON mail (to_id)`);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS invites (token TEXT PRIMARY KEY, owner TEXT NOT NULL, exp INTEGER NOT NULL)`);
     try { this.sql.exec('ALTER TABLE mail ADD COLUMN tier INTEGER NOT NULL DEFAULT 0'); } catch { } // package size (added later; fails once it exists)
   }
 
@@ -133,6 +136,7 @@ export class Hub {
   tidy() {
     this.sql.exec('DELETE FROM mail WHERE at < ?', Date.now() - MAIL_DAYS * DAY);
     this.sql.exec('DELETE FROM friends WHERE seen < ?', Date.now() - FRIENDS_KEEP_DAYS * DAY);
+    this.sql.exec('DELETE FROM invites WHERE exp < ?', Date.now());
     this.sql.exec('DELETE FROM sent WHERE day < ?', new Date(Date.now() - 2 * DAY).toISOString().slice(0, 10));
   }
 
@@ -192,6 +196,25 @@ export class Hub {
         const tier = m.t === 'package' ? Math.max(0, Math.min(3, m.tier | 0)) : 0; // how big: the sender's game decides (0-3)
         const why = this.post(m.t, a.id, m.to, tier);
         this.send(ws, why ? { t: `${m.t}-fail`, to: m.to, why } : { t: `${m.t}-sent`, to: m.to });
+        break;
+      }
+      case 'invite': {
+        const b = crypto.getRandomValues(new Uint8Array(12));
+        const token = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_');
+        const exp = Date.now() + 7 * DAY;
+        this.sql.exec('DELETE FROM invites WHERE owner = ?', a.id); // one live link each: a new one cancels the old
+        this.sql.exec('INSERT INTO invites (token, owner, exp) VALUES (?, ?, ?)', token, a.id, exp);
+        this.send(ws, { t: 'invite', token, exp });
+        break;
+      }
+      case 'redeem': {
+        if (this.limited(ws, a)) return this.send(ws, { t: 'redeem-fail', why: 'slow down' });
+        const row = typeof m.token === 'string' ? this.sql.exec('SELECT owner FROM invites WHERE token = ? AND exp > ?', m.token, Date.now()).toArray()[0] : null;
+        if (!row) return this.send(ws, { t: 'redeem-fail', why: 'expired' });
+        if (row.owner === a.id) return this.send(ws, { t: 'redeem-fail', why: 'own' });
+        const why = this.post('friendreq', a.id, row.owner);
+        if (why === 'full') return this.send(ws, { t: 'redeem-fail', why });
+        this.send(ws, { t: 'redeemed', owner: row.owner });
         break;
       }
       case 'ack': {
