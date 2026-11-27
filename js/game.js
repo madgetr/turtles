@@ -3203,7 +3203,14 @@ function pointerEnd(e) {
       'Remove', () => { objs = objs.filter(x => x !== o); emit(o.x, o.y, 'sparkle', 6); save(); });
   }
   else if (gest?.kind === 'yardswipe') { if (e.type === 'pointerup') swipeEnd(e.clientX - gest.sx, performance.now() - gest.t0); else swipeCancel(); }
-  else if (gest?.kind === 'maybe' && e.type === 'pointerup') { if (visit) say('👀 Just visiting: look around, but no touching', 2000); else tap(s2w(e.clientX, e.clientY)); }
+  else if (gest?.kind === 'maybe' && e.type === 'pointerup') {
+    if (!visit) tap(s2w(e.clientX, e.clientY));
+    else if (visit.brought && !visit.pending) { // tap to call the turtle you brought, like the Call button at home
+      const p = s2w(e.clientX, e.clientY);
+      relay(visit.host, { k: 'go', x: Math.round(p.x), y: Math.round(p.y) });
+      emit(p.x, p.y, 'sparkle', 6); say(`🐢 Come here, ${visit.brought}!`, 1500);
+    } else say('👀 Just visiting: look around, but no touching', 2000);
+  }
   if (gest?.kind === 'pinch' && ptrs.size) gest = { kind: 'done' }; // the finger left behind doesn't tap
   if (!ptrs.size) gest = null;
 }
@@ -3779,6 +3786,11 @@ function onRelay(from, d) {
   if (d.k === 'snap' && visit?.host === from && typeof d.z === 'string') return onSnap(d);
   if (d.k === 'pose' && visit?.host === from && !visit.pending) return onPose(d);
   if (d.k === 'bring' && net.guests.has(from) && !visit && d.t && !turtles.some(t => t.guest === from)) return onBring(from, d.t);
+  if (d.k === 'go' && net.guests.has(from) && Number.isFinite(d.x) && Number.isFinite(d.y)) { // the visitor calls their turtle
+    const t = turtles.find(o => o.guest === from); if (!t) return;
+    wakeUp(t); t.userTarget = { x: clamp(d.x, 35, YW - 35), y: clamp(d.y, 25, YH - 15) }; t.eat = null; t.drinkT = 0; t.outing = null;
+    return;
+  }
   if (d.k === 'gift') return onGiftOffer(from, d);
   if (d.k === 'gift-yes' || d.k === 'gift-no') return onGiftReply(from, d);
 }
@@ -3811,7 +3823,7 @@ function startVisit(y, yi) {
   save();
   const mine = own(sel) ? packTurtle(sel) : null; // your picked turtle comes along
   visit = { host: visit.host, pending: false, t0: Date.now(), home: packYard(), picked, yi, groundStr: '' };
-  if (mine) relay(visit.host, { k: 'bring', t: mine });
+  if (mine) { relay(visit.host, { k: 'bring', t: mine }); visit.brought = mine.name; }
   picked = false;
   document.body.classList.add('visiting');
   applyVisitSnap(y, yi, true);
