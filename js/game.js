@@ -4453,7 +4453,7 @@ else {
 }
 
 // ---------- the wild: released turtles (plus a few natives) roam a big meadow; catch them back with nets ----------
-const FERAL_DAYS = 60, WILD_CAP = 40, WILD_NATIVES = 4;
+const FERAL_DAYS = 60, WILD_CAP = 40, WILD_NATIVES = 4, HIDE_HOURS = 8; // a turtle that slips the net won't show up again for a while
 const NETS = [ // tier 1..3: odds on a freshly released turtle (hi) and a fully feral one (lo)
   null, { name: 'Basic net', cost: 120, hi: 0.9, lo: 0.12 }, { name: 'Sturdy net', cost: 300, hi: 0.95, lo: 0.3 }, { name: 'Master net', cost: 750, hi: 0.99, lo: 0.55 },
 ];
@@ -4488,9 +4488,9 @@ function catchWildTurtle(id, netTier) {
   if (!w) return { ok: false, why: 'gone' };
   if (!(wildNets[netTier - 1] > 0)) return { ok: false, why: 'No nets of that kind' };
   if (yardRoom() <= 0) return { ok: false, why: 'No room in this yard' };
-  wildNets[netTier - 1]--;
   w.lastSeenAt = Date.now();
-  if (Math.random() >= catchOddsFor(w, netTier)) { save(); return { ok: false, escaped: true }; }
+  if (Math.random() >= catchOddsFor(w, netTier)) { w.hideUntil = Date.now() + HIDE_HOURS * 36e5; save(); return { ok: false, escaped: true }; } // a miss keeps the net
+  wildNets[netTier - 1]--; // the net goes home with the turtle
   wildPool.splice(wildPool.indexOf(w), 1);
   const { id: _i, origin, releasedAt, lastSeenAt, sightings, ...rest } = w;
   const t = makeTurtle({ ...rest, gut: [], x: clamp(cam.x + rand(-60, 60), 60, YW - 60), y: clamp(cam.y + rand(-60, 60), 60, YH - 60), a: rand(-3, 3),
@@ -4504,7 +4504,7 @@ function wildShopRows(rows) {
   rows.push({ icon: '🌲', name: 'Visit the wild', desc: 'Released turtles roam here. Bring a net to catch one back.', btn: 'Go', action: () => { shop.hidden = true; openWild(); } });
   for (let k = 1; k <= 3; k++) {
     const n = NETS[k];
-    rows.push({ icon: netSvg(k), name: `${n.name} (have ${wildNets[k - 1]})`, desc: `One throw. ~${Math.round(n.hi * 100)}% on a freshly released turtle, ~${Math.round(n.lo * 100)}% on a fully wild one.`,
+    rows.push({ icon: netSvg(k), name: `${n.name} (have ${wildNets[k - 1]})`, desc: `Used up on a catch (kept if it gets away). ~${Math.round(n.hi * 100)}% on a freshly released turtle, ~${Math.round(n.lo * 100)}% on a fully wild one.`,
       cost: n.cost, buy: () => { wildNets[k - 1]++; say(`${n.name} ready`); } });
   }
 }
@@ -4552,7 +4552,7 @@ function openWild() {
   if (visit || LAB) return;
   seedNatives();
   wild.cam = { x: WW / 2, y: WH / 2, z: 1 };
-  const pool = [...wildPool].sort(() => Math.random() - 0.5), n = Math.min(pool.length, 1 + (Math.random() < 0.6) + (Math.random() < 0.25));
+  const pool = wildPool.filter(w => !(w.hideUntil > Date.now())).sort(() => Math.random() - 0.5), n = Math.min(pool.length, 1 + (Math.random() < 0.6) + (Math.random() < 0.25));
   wild.walkers = pool.slice(0, n).map(w => {
     let p = grassSpot();
     for (let i = 0; i < 20 && dist(p, wild.cam) < 600; i++) p = grassSpot(); // few and far between: not right where you start
@@ -4677,6 +4677,13 @@ function throwStep(dt) { // net animation; the catch itself was already rolled
   if (th.age > (th.ok ? 1.6 : 1.3)) { if (th.ok) wild.walkers.splice(wild.walkers.indexOf(th.t), 1); wild.throwing = null; }
 }
 document.getElementById('wild-close').onclick = closeWild;
+function petWild(t) { // a small ⭐ for a gentle pat: a few per turtle per visit, with a short cooldown
+  const now = Date.now();
+  if ((t.pets || 0) >= 3 || now < (t.petAt || 0) + 8000) return;
+  t.pets = (t.pets || 0) + 1; t.petAt = now; t.idle = Math.max(t.idle, 1.5); t.tgt = null;
+  earn(1, t.x, t.y); buzz(15); save();
+  say(`💚 ${t.wild.name} liked that · +1⭐ (⭐ ${stars})`, 1600);
+}
 { // one finger pans, two fingers pinch-zoom (and pan), wheel zooms, a short tap picks a turtle
   const ptrs = new Map(); let g = null;
   const mid = () => { const [a, b] = [...ptrs.values()]; return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)) }; };
@@ -4701,6 +4708,7 @@ document.getElementById('wild-close').onclick = closeWild;
     if (g?.kind === 'pan' && g.moved < 10 && !ptrs.size) {
       const p = wS2W(e.clientX, e.clientY);
       wild.pick = wild.walkers.filter(t => !(t.flee > 0) && !t.held && dist(p, t) < t.S * 1.6 + 14 / wild.cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0] || null;
+      if (wild.pick) petWild(wild.pick);
       renderWildPanel();
     }
     g = ptrs.size ? { kind: 'done' } : null; // the finger left after a pinch doesn't pan or tap
