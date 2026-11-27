@@ -3893,7 +3893,7 @@ function startVisit(y, yi) {
   save();
   const mine = own(sel) ? packTurtle(sel) : null; // your picked turtle comes along
   visit = { host: visit.host, pending: false, t0: Date.now(), home: packYard(), picked, yi, groundStr: '' };
-  if (mine) { relay(visit.host, { k: 'bring', t: mine }); visit.brought = mine.name; }
+  if (mine) { relay(visit.host, { k: 'bring', t: mine }); visit.brought = mine.name; visit.buddy = { born: mine.born, name: mine.name }; }
   picked = false;
   document.body.classList.add('visiting');
   applyVisitSnap(y, yi, true);
@@ -3958,9 +3958,22 @@ function goHome(msg) {
   graceT = GRACE_SECS;
   renderVisitBar();
   const secs = (Date.now() - v.t0) / 1000;
+  const warmed = v.buddy && befriend(v.buddy, secs);
   if (secs > 90) showAway(simulateAway(secs), yardName); // your turtles kept living while you were out
   save(); renderPills();
   say(msg || `🏡 Back home in ${yardName}`, 2500);
+  if (warmed) setTimeout(() => say(warmed, 3500), 2700);
+}
+// Visiting friends makes the turtle you brought slowly friendlier: the gain shrinks as it gets cuddlier (1 - f),
+// so a grumpy turtle gains about one dot in ~15 min out, and a really long visit counts no more than 3 hours.
+const BEFRIEND_RATE = 1 / 3600, BEFRIEND_MAX_SECS = 3 * 3600;
+function befriend(b, secs) { // returns a message if the turtle got friendlier
+  const t = turtles.find(o => own(o) && sameTurtle(o, b));
+  if (!t || secs < 30) return null;
+  const f0 = t.traits.friendly;
+  t.traits = { ...t.traits, friendly: 1 - (1 - f0) * Math.exp(-BEFRIEND_RATE * Math.min(secs, BEFRIEND_MAX_SECS)) };
+  if (dots(t.traits.friendly) > dots(f0)) return `😊 ${t.name} made friends on the visit and feels cuddlier!`;
+  return t.traits.friendly - f0 > 0.005 ? `😊 ${t.name} enjoyed the visit and is a little friendlier` : null;
 }
 const visitBar = document.getElementById('visitbar');
 function renderVisitBar() {
