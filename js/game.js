@@ -3376,7 +3376,7 @@ stageEl.addEventListener('click', () => {
   menu.querySelector('.title').textContent = `🐢 ${sel.name}`;
   menu.querySelector('.persona').textContent = personality(sel.traits);
   const mi = morphInfo(sel);
-  menu.querySelector('.age').textContent = `🎂 ${ageText(sel)}` + (mi.label ? ` · ${mi.rarity >= 3 ? '🌟' : '✨'} ${mi.label} (${RARITY_NAMES[mi.rarity]})` : '');
+  menu.querySelector('.age').textContent = (sel.guest ? `🏡 Visiting from ${friendName(sel.guest)}'s yard · ` : '') + `🎂 ${ageText(sel)}` + (mi.label ? ` · ${mi.rarity >= 3 ? '🌟' : '✨'} ${mi.label} (${RARITY_NAMES[mi.rarity]})` : '');
   menu.querySelector('.mood').textContent = moods(sel);
   menu.querySelector('.traits').innerHTML = TRAITS.map(d => {
     const n = dots(sel.traits[d.k]);
@@ -3388,6 +3388,9 @@ stageEl.addEventListener('click', () => {
   gb.hidden = !RELAY_URL || !friends.length; gb.disabled = turtles.length < 2;
   const vb = document.getElementById('m-vet');
   vb.hidden = !up.vet; vb.textContent = `💊 Use vet kit (${up.vet} left)`;
+  if (sel.guest) for (const id of ['m-rename', 'm-vet', 'm-move', 'm-gift', 'm-release']) document.getElementById(id).hidden = true; // a friend's turtle: look only
+  document.getElementById('m-rename').hidden = !!sel.guest; document.getElementById('m-release').hidden = !!sel.guest;
+  document.getElementById('m-close').textContent = sel.guest ? 'Close' : 'Cancel';
   menu.hidden = false;
   focusTurtle(sel);
 });
@@ -3884,11 +3887,7 @@ function renderVisitBar() {
   if (visit && !visit.pending) {
     visitBar.querySelector('span').textContent = `👀 ${friendName(visit.host)}'s yard: ${yardName}`;
     b.textContent = '🏠 Go home'; b.onclick = () => goHome();
-  } else if (net.guests.size) {
-    const names = [...net.guests].map(friendName);
-    visitBar.querySelector('span').textContent = `👀 ${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} visiting`;
-    b.textContent = 'End visit'; b.onclick = endHosting;
-  } else { visitBar.hidden = true; return; }
+  } else { visitBar.hidden = true; return; } // hosting: end visits from the friends list
   visitBar.hidden = false;
 }
 
@@ -4136,7 +4135,7 @@ function renderFriends() {
     const on = net.online.has(f.id), here = net.guests.has(f.id);
     const sent = sentToday(f);
     const act = giftTurtle ? `<button class="act go give" ${on ? '' : 'disabled'}>🎁 Give</button>`
-      : `<button class="act pkg ${sent ? 'done' : 'go'}" ${!sent && net.up && !net.sending ? '' : 'disabled'} aria-label="Send a care package">${sent ? '📦 ✓' : '📦 Send'}</button><button class="act go visit" ${on && net.up && !net.knocking ? '' : 'disabled'}>👀 Visit</button>`;
+      : `<button class="act pkg ${sent ? 'done' : 'go'}" ${!sent && net.up && !net.sending ? '' : 'disabled'} aria-label="Send a care package">${sent ? '📦 ✓' : '📦 Send'}</button>${here ? '<button class="act end">👋 End visit</button>' : `<button class="act go visit" ${on && net.up && !net.knocking ? '' : 'disabled'}>👀 Visit</button>`}`;
     return `<div class="fr ${giftTurtle ? '' : 'wide'}" data-id="${esc(f.id)}"><i class="dot ${on ? 'on' : ''}"></i><button class="nm">${esc(f.name)}<small>${here ? 'Visiting you now' : on ? 'Online now' : 'Not online'}${sent ? ' · 📦 sent today' : ''}</small></button>${act}<button class="x" aria-label="Remove">✕</button></div>`;
   }).join('') : '<div class="empty">No friends yet. Swap visit codes to add one!</div>';
 }
@@ -4162,6 +4161,7 @@ friendsEl.querySelector('.list').addEventListener('click', e => {
   const row = e.target.closest('.fr'); if (!row) return;
   const f = friendOf(row.dataset.id); if (!f) return;
   if (e.target.closest('.visit')) return knock({ id: f.id });
+  if (e.target.closest('.end')) { netSend({ t: 'leave', to: f.id }); net.guests.delete(f.id); dropGuestTurtle(f.id); renderFriends(); return; }
   if (e.target.closest('.give')) return sendGift(f.id);
   if (e.target.closest('.pkg')) return sendPackage(f.id);
   if (e.target.closest('.nm')) return askName('Rename your friend', f.name, n => { f.name = n; saveFriends(); renderVisitBar(); }, 16);
