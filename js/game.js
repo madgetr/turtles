@@ -3710,6 +3710,8 @@ askEl.querySelector('.yes').onclick = () => askDone(true);
 askEl.querySelector('.no').onclick = () => askDone(false);
 
 // ----- hosting: friends looking at your yard -----
+const AUTO_KEY = 'turtle-auto-accept'; // friends walk right in (on unless turned off)
+const autoAccept = () => localStorage.getItem(AUTO_KEY) !== '0';
 function onKnock(from, byCode) {
   const f = friendOf(from), no = () => netSend({ t: 'answer', to: from, yes: false });
   if (net.guests.has(from)) return netSend({ t: 'answer', to: from, yes: true });
@@ -3723,9 +3725,9 @@ function onKnock(from, byCode) {
     if (!f) askName('Who is visiting? 👫', 'Friend', n => addFriend(from, n), 16);
     else { say(`👀 ${f.name} came to visit!`, 3000); buzz(40); }
   };
-  if (f && !byCode) return letIn(); // friends just walk in, no need to ask
-  askNet('🔔 Someone used your visit code!',
-    `Only let them in if you know who it is. They can look around ${yardName}, but can't change anything.`,
+  if (f && !byCode && autoAccept()) return letIn(); // friends just walk in, no need to ask
+  askNet(f ? `🔔 ${f.name} wants to visit!` : '🔔 Someone used your visit code!',
+    f ? `They'd like to look around ${yardName}. They can't change anything.` : `Only let them in if you know who it is. They can look around ${yardName}, but can't change anything.`,
     'Let them in', 'Not now', letIn, no);
 }
 function dropGuestTurtle(g) { // a visitor went home: their turtle goes with them
@@ -3765,7 +3767,7 @@ function knock(target) { // { code } or { id }
   net.knocking = { ...target };
   const k = net.knocking;
   netSend({ t: 'knock', ...(target.code ? { code: target.code } : { to: target.id }) });
-  say(target.code ? '🔔 Knocking… waiting for your friend to say yes' : '🚶 Heading over…', 5000);
+  say('🔔 Knocking…', 5000);
   renderFriends();
   setTimeout(() => { if (net.knocking === k) { net.knocking = null; renderFriends(); say('No answer. Maybe they are busy?', 3000); } }, 60e3);
 }
@@ -4142,6 +4144,7 @@ function renderFriends() {
   openB.classList.toggle('go', !net.code);
   openB.disabled = !net.up; friendsEl.querySelector('.share').disabled = !net.up;
   friendsEl.querySelector('.knock').disabled = !net.up || !!net.knocking;
+  friendsEl.querySelector('.auto').textContent = autoAccept() ? '🚪 Friends walk right in: On' : '🔔 Friends knock first (auto-accept off)';
   const list = [...friends].sort((a, b) => net.online.has(b.id) - net.online.has(a.id));
   friendsEl.querySelector('.list').innerHTML = list.length ? list.map(f => {
     const on = net.online.has(f.id), here = net.guests.has(f.id);
@@ -4154,6 +4157,7 @@ function renderFriends() {
 setInterval(renderFriends, 15e3); // code countdown
 const renderFriendPill = () => { friendsBtn.textContent = net.online.size ? `👫 ${net.online.size}` : '👫'; friendsBtn.classList.toggle('ready', net.online.size > 0); };
 friendsBtn.onclick = () => openFriends();
+friendsEl.querySelector('.auto').onclick = () => { localStorage.setItem(AUTO_KEY, autoAccept() ? '0' : '1'); renderFriends(); };
 friendsEl.querySelector('.share').onclick = () => { if (!netSend({ t: 'invite' })) say('📶 Not connected yet. Try again in a moment', 2500); };
 friendsEl.querySelector('.open').onclick = () => {
   if (net.code) { netSend({ t: 'close' }); net.code = null; renderFriends(); }
