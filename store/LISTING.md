@@ -55,7 +55,7 @@ A mystery gift and three little jobs wait for you each day. Miss a day? No probl
 • No ads
 • No in-app purchases
 • No accounts or sign-ins
-• Your game stays on your device. Visit friends' yards only when they say yes, with no chat
+• Your game stays on your device. Visit friends' yards (new friends only join when you say yes), with no chat
 • Turtles can't die while you're away
 
 Gentle sounds, cozy day and night, and a yard that keeps growing with you. Start your turtle family today!

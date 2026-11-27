@@ -3,7 +3,7 @@
 A tiny Cloudflare Worker that passes messages between two games so friends can visit each other's yards, give turtles as gifts and send daily care packages. No accounts, no yards, no names: every game connects with a random device id. The only stored data is for care packages: each game's list of friend ids (forgotten after 90 days away) and a mailbox (packages wait up to 7 days).
 
 - **Visit codes:** the host gets a 6-digit code that works for 10 minutes and lets one visitor in. The host still has to tap **Let them in**.
-- **Friends:** after one visit both games remember each other on the device. Mutual friends can see each other online and knock without a code. The host still says yes every time.
+- **Friends:** after one visit both games remember each other on the device. Mutual friends can see each other online and visit without a code. The host's game lets friends straight in (decided in the game, not here).
 - **Safety:** no chat. Knocking is rate limited (per connection and per IP) so codes can't be guessed. Only the game's own pages can connect (`ALLOWED_ORIGINS` in `wrangler.toml`).
 
 ## Run it locally

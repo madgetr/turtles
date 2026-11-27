@@ -1,6 +1,8 @@
 // Pet Turtle: top-down, procedurally animated turtle you can call, feed, water, clean up after and play with.
 import * as snd from './sound.js';
 // play a sound for something happening at world point p (skipped when it's off screen)
+// ?lab = turtle builder debug page (js/lab.js): the game never starts and never saves
+const LAB = new URLSearchParams(location.search).has('lab');
 const sfx = (name, p) => { if (!p || inView(p, 80, viewRect())) snd.play(name); };
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
@@ -391,10 +393,11 @@ const SAVE3 = 'turtle-save-v3', SAVE = 'turtle-save-v2', OLD_SAVE = 'turtle-save
 const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud', 'chub', 'diet', 'born', 'arrived', 'morph'];
 let yards = [null], yardIdx = 0, yardName = 'My Yard';
 const packTurtle = t => Object.fromEntries(KEEP.map(k => [k, t[k]]));
+const own = t => t.releasing === undefined && !t.guest; // your turtles (not fading away, not a friend's visiting turtle)
 function packYard() {
   return {
     name: yardName, t: Date.now(),
-    turtles: turtles.filter(t => t.releasing === undefined).map(packTurtle), sel: Math.max(0, turtles.indexOf(sel)),
+    turtles: turtles.filter(own).map(packTurtle), sel: Math.max(0, turtles.filter(own).indexOf(sel)),
     poops, level: bowl.level,
     foods: foods.map(({ x, y, type, bites, max, rot, fromFeeder, slot, t }) => ({ x, y, type, bites, max, rot, fromFeeder, slot, t })),
     up: Object.fromEntries(Object.entries(up).filter(([k]) => !SHARED_UP.includes(k))),
@@ -437,8 +440,8 @@ function rescaleToStandard() {
 }
 let loadingBackup = false;
 function save() {
-  if (loadingBackup) return; // a backup is being loaded: don't write the old game over it
-  yards[yardIdx] = visit ? visit.home : packYard(); // visiting a friend: your own yard waits in visit.home
+  if (LAB || loadingBackup) return; // a backup is being loaded: don't write the old game over it
+  yards[yardIdx] = visit?.home || packYard(); // visiting a friend: your own yard waits in visit.home
   localStorage.setItem(SAVE3, JSON.stringify({
     v: 3, yards, active: yardIdx, base, t: Date.now(),
     shared: { stars, lastDaily, loot, ...Object.fromEntries(SHARED_UP.map(k => [k, up[k]])) },
@@ -1107,7 +1110,7 @@ const stageEl = document.getElementById('stage');
 const starsEl = document.getElementById('stars');
 function drawHud() {
   starsEl.textContent = `⭐ ${stars}`;
-  const live = turtles.filter(t => t.releasing === undefined);
+  const live = turtles.filter(own);
   if (isPicked()) stageEl.textContent = `${st.health < SICK ? '🤒' : '🐢'} ${T.name} · ` + (T.growth >= 1 ? 'Adult' : `${stageOf(T.growth)} · ${Math.floor(T.growth * 100)}%`) + (st.health < SICK ? ' · sick' : '') + '  ⋯';
   else stageEl.textContent = `🐢 ${live.length} turtles` + (live.some(t => t.st.health < SICK) ? ' · 🤒 someone is sick' : '');
   for (const [k, el] of bars) { // nobody picked: the bars show the yard average
@@ -2472,7 +2475,7 @@ function moveTurtle(t, j) {
 }
 const yardsEl = document.getElementById('yards'), yardsBtn = document.getElementById('yards-btn');
 function yardSummary(i) { // turtle count and any problems, for the live yard or a stored one
-  const list = i === yardIdx ? turtles.filter(t => t.releasing === undefined) : yards[i].turtles;
+  const list = i === yardIdx ? turtles.filter(own) : yards[i].turtles;
   const sick = list.filter(t => t.st.health < SICK).length, needy = list.filter(t => t.st.hunger < 30 || t.st.thirst < 30).length;
   const ago = i === yardIdx ? 0 : (Date.now() - yards[i].t) / 1000;
   const st = sick ? '🤒' : needy ? '🥬' : ago > 86400 ? '👀' : '😊';
@@ -3407,7 +3410,7 @@ function statusIcons(t) {
   return c.length ? c.slice(0, 4).join('') : '😊';
 }
 function openRoster() {
-  const live = turtles.filter(t => t.releasing === undefined);
+  const live = turtles.filter(own);
   roster.querySelector('.title').textContent = `🐢 ${yards.length > 1 ? yardName : 'Your turtles'} (${live.length})`;
   roster.querySelector('.list').innerHTML = live.map(t => {
     const s = t.st, well = (s.health + s.hunger + s.thirst + s.happy) / 4;
@@ -3622,7 +3625,7 @@ let visit = null; // looking at a friend's yard: { host, pending, t0, home (your
 const friendsEl = document.getElementById('friends'), friendsBtn = document.getElementById('friends-btn');
 const netWanted = () => !!RELAY_URL && !document.hidden && (friends.length > 0 || !!localStorage.getItem(INVITE_KEY) || !friendsEl.hidden || !!net.code || net.guests.size > 0 || !!visit || !!net.knocking);
 function netStart() {
-  if (!netWanted() || net.ws) return;
+  if (LAB || !netWanted() || net.ws) return; // the lab never goes online (it has no real yard to show friends)
   clearTimeout(net.timer);
   let ws;
   try { ws = new WebSocket(`${RELAY_URL}/ws?id=${deviceId()}`); } catch { return netRetry(); }
@@ -3701,19 +3704,27 @@ function onKnock(from, byCode) {
   const f = friendOf(from), no = () => netSend({ t: 'answer', to: from, yes: false });
   if (net.guests.has(from)) return netSend({ t: 'answer', to: from, yes: true });
   if (visit || net.guests.size >= MAX_GUESTS || (!f && !byCode)) return no();
-  askNet(f ? `🔔 ${f.name} wants to visit!` : '🔔 Someone used your visit code!',
-    f ? `They'd like to look around ${yardName}. They can't change anything.` : `Only let them in if you know who it is. They can look around ${yardName}, but can't change anything.`,
-    'Let them in', 'Not now', () => {
-      if (visit || net.guests.size >= MAX_GUESTS) return no();
-      if (!netSend({ t: 'answer', to: from, yes: true })) return;
-      net.guests.add(from); hostSnapNow = true;
-      if (!f) { netSend({ t: 'close' }); net.code = null; } // a code lets one visitor in
-      renderVisitBar(); renderFriends(); snd.play('job');
-      if (!f) askName('Who is visiting? 👫', 'Friend', n => addFriend(from, n), 16);
-      else say(`👀 ${f.name} is visiting!`, 2500);
-    }, no);
+  const letIn = () => {
+    if (visit || net.guests.size >= MAX_GUESTS) return no();
+    if (!netSend({ t: 'answer', to: from, yes: true })) return;
+    net.guests.add(from); hostSnapNow = true;
+    if (!f) { netSend({ t: 'close' }); net.code = null; } // a code lets one visitor in
+    renderVisitBar(); renderFriends(); snd.play('job');
+    if (!f) askName('Who is visiting? 👫', 'Friend', n => addFriend(from, n), 16);
+    else { say(`👀 ${f.name} came to visit!`, 3000); buzz(40); }
+  };
+  if (f && !byCode) return letIn(); // friends just walk in, no need to ask
+  askNet('🔔 Someone used your visit code!',
+    `Only let them in if you know who it is. They can look around ${yardName}, but can't change anything.`,
+    'Let them in', 'Not now', letIn, no);
+}
+function dropGuestTurtle(g) { // a visitor went home: their turtle goes with them
+  turtles = turtles.filter(t => !(t.guest && (!g || t.guest === g)));
+  if (sel.guest && (!g || sel.guest === g)) sel = turtles[0];
+  use(sel);
 }
 function endHosting() {
+  dropGuestTurtle();
   for (const g of net.guests) netSend({ t: 'leave', to: g });
   net.guests.clear(); renderVisitBar(); renderFriends();
 }
@@ -3723,11 +3734,12 @@ const poseOf = t => [Math.round(t.x), Math.round(t.y), r2(t.a), Math.round(t.v),
 let hostSnapNow = false, hostSnapT = 0, hostPoseT = 0, hostSending = false, hostYard = -1, hostCount = -1;
 function hostTick(now) { // called every frame: the yard every few seconds (and when it changes), turtle moves 4 times a second
   if (!net.guests.size || !net.up || visit) return;
-  const live = turtles.filter(t => t.releasing === undefined);
+  const live = [...turtles.filter(own), ...turtles.filter(t => t.guest)]; // same order as the snapshot
   if (yardIdx !== hostYard || live.length !== hostCount) hostSnapNow = true;
   if ((hostSnapNow || now - hostSnapT > 4000) && !hostSending) {
     hostSnapNow = false; hostSnapT = now; hostYard = yardIdx; hostCount = live.length; hostSending = true;
     const y = packYard(), yi = yardIdx; delete y.cam;
+    y.turtles.push(...turtles.filter(t => t.guest).map(packTurtle));
     gzipB64(JSON.stringify(y)).then(z => { for (const g of net.guests) relay(g, { k: 'snap', z, y: yi }); }).catch(() => { }).finally(() => { hostSending = false; });
   }
   if (now - hostPoseT > 250 && hostYard === yardIdx) {
@@ -3743,7 +3755,7 @@ function knock(target) { // { code } or { id }
   net.knocking = { ...target };
   const k = net.knocking;
   netSend({ t: 'knock', ...(target.code ? { code: target.code } : { to: target.id }) });
-  say('🔔 Knocking… waiting for your friend to say yes', 5000);
+  say(target.code ? '🔔 Knocking… waiting for your friend to say yes' : '🚶 Heading over…', 5000);
   renderFriends();
   setTimeout(() => { if (net.knocking === k) { net.knocking = null; renderFriends(); say('No answer. Maybe they are busy?', 3000); } }, 60e3);
 }
@@ -3751,20 +3763,27 @@ function onAnswer(from, yes) {
   const k = net.knocking;
   if (!k || (k.id && k.id !== from)) return;
   net.knocking = null; renderFriends();
-  if (!yes) return say(`${k.id ? friendName(from) : 'Your friend'} said not right now`, 3000);
+  if (!yes) return say(`${k.id ? friendName(from) : 'Your friend'} can't have visitors right now`, 3000);
   visit = { host: from, pending: true };
   say('🚪 Opening the gate…', 3000);
   setTimeout(() => { if (visit?.pending && visit.host === from) { visit = null; netSend({ t: 'leave', to: from }); say("Couldn't load your friend's yard. Try again?", 3000); } }, 10e3);
 }
 function onLeft(from) {
   if (visit?.host === from) return goHome(visit.pending ? null : `👋 ${friendName(from)} ended the visit`);
-  if (net.guests.delete(from)) { say(`👋 ${friendName(from)} went home`, 2500); renderVisitBar(); renderFriends(); }
+  if (net.guests.delete(from)) { dropGuestTurtle(from); say(`👋 ${friendName(from)} went home`, 2500); renderVisitBar(); renderFriends(); }
 }
 function onRelay(from, d) {
   if (d.k === 'snap' && visit?.host === from && typeof d.z === 'string') return onSnap(d);
   if (d.k === 'pose' && visit?.host === from && !visit.pending) return onPose(d);
+  if (d.k === 'bring' && net.guests.has(from) && !visit && d.t && !turtles.some(t => t.guest === from)) return onBring(from, d.t);
   if (d.k === 'gift') return onGiftOffer(from, d);
   if (d.k === 'gift-yes' || d.k === 'gift-no') return onGiftReply(from, d);
+}
+function onBring(from, p) {
+  const t = makeTurtle({ ...cleanTurtle(p), x: cam.x + rand(-40, 40), y: cam.y + rand(-40, 40), a: rand(-3, 3) });
+  t.guest = from; keepInYard(t); turtles.push(t); use(t); resetFeet(); use(sel);
+  emit(t.x, t.y, 'sparkle', 20); hostSnapNow = true;
+  say(`🐢 ${friendName(from)} brought ${t.name} along!`, 3000);
 }
 async function onSnap(d) {
   let y;
@@ -3787,7 +3806,9 @@ function startVisit(y, yi) {
   for (const el of document.querySelectorAll('.sheet, #menu, #roster, #shop')) el.hidden = true;
   endHosting(); endArrange(); endPaint();
   save();
+  const mine = own(sel) ? packTurtle(sel) : null; // your picked turtle comes along
   visit = { host: visit.host, pending: false, t0: Date.now(), home: packYard(), picked, yi, groundStr: '' };
+  if (mine) relay(visit.host, { k: 'bring', t: mine });
   picked = false;
   document.body.classList.add('visiting');
   applyVisitSnap(y, yi, true);
@@ -3877,11 +3898,11 @@ function renderVisitBar() {
 let giftTurtle = null;
 const sameTurtle = (a, b) => a.born === b.born && a.name === b.name;
 function yardTurtles(j) { // { list, live, fits } for yard j; live = the yard on screen (your own, or the one you left to visit)
-  if (j === yardIdx && !visit) return { list: turtles.filter(t => t.releasing === undefined), live: true, fits: Math.min(MAX_TURTLES, YARDS[up.yard || 0].fits) };
+  if (j === yardIdx && !visit?.home) return { list: turtles.filter(own), live: true, fits: Math.min(MAX_TURTLES, YARDS[up.yard || 0].fits) };
   const y = j === yardIdx ? visit.home : yards[j];
   return { list: y.turtles, live: false, fits: Math.min(MAX_TURTLES, YARDS[y.up?.yard || 0].fits) };
 }
-const yardNameOf = j => (j === yardIdx ? (visit ? visit.home.name : yardName) : yards[j].name);
+const yardNameOf = j => (j === yardIdx ? (visit?.home ? visit.home.name : yardName) : yards[j].name);
 function sendGift(to) {
   const t = giftTurtle; giftTurtle = null; friendsEl.hidden = true;
   if (!t || !turtles.includes(t)) return;
@@ -4004,7 +4025,7 @@ function yardWorth(y) {
 }
 function gameWorth() {
   let w = stars + YARD_COSTS.slice(0, yards.length - 1).reduce((a, c) => a + c, 0);
-  yards.forEach((y, j) => { w += yardWorth(j === yardIdx ? (visit ? visit.home : packYard()) : y); });
+  yards.forEach((y, j) => { w += yardWorth(j === yardIdx ? (visit?.home || packYard()) : y); });
   w += up.toys.reduce((a, k) => a + (TOYS[k]?.cost || 0), 0) + up.brushes.reduce((a, k) => a + (GROUND[k]?.cost || 0), 0) + up.vet * 40;
   for (const [id, n] of Object.entries(loot.found)) if (ITEMS[id]) w += FIND_WORTH[ITEMS[id].rar] * n;
   return Math.round(w);
@@ -4184,6 +4205,7 @@ function frameBody(now) {
   const v = viewRect();
   for (const t of turtles) {
     use(t);
+    if (t.guest) t.st.health = 100; // a friend's turtle on a visit: never sick, never saved
     // off-screen turtles keep living but skip the leg animation; feet snap back into place when they reappear
     const vis = inView(t, t.S * 3, v);
     if (vis && t.off) resetFeet();
@@ -4294,35 +4316,41 @@ function frameBody(now) {
   requestAnimationFrame(frame);
 }
 
-resize(); // measures the HUD
-const info = load();
-rescaleToStandard();
-const firstWorld = !base;
-if (!base) base = { ...STD_BASE };
-if (info.legacy) for (const p of [...turtles, ...poops, ...foods]) p.y -= TOP; // old saves used screen coordinates
-if (!info.hadBowl) { bowl.x = base.w - 60; bowl.y = 58; }
-if (info.fresh) { turtles[0].x = base.w / 2; turtles[0].y = base.h / 2; }
-applyYard();
-if (firstWorld) { cam.x = YW / 2; cam.y = YH / 2; cam.z = 1; clampCam(); }
-for (const t of turtles) { use(t); resetFeet(); }
-use(sel);
-if (info.away > 90) showAway(simulateAway(info.away));
-if (info.newStars) setTimeout(() => say('New: collect ⭐ by caring for your turtles. Tap ⭐ to shop!', 4000), 800);
-dailyBonus();
-renderPills();
-ensurePlots(); syncCrabs();
-addEventListener('resize', resize);
-setInterval(save, 4000);
-addEventListener('pagehide', save);
-// Switching away from the app counts as being away: simulate that time when you come back.
-let hiddenAt = null;
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { if (visit) goHome(); hiddenAt = Date.now(); save(); snd.pause(); netStop(); return; }
-  snd.resume(); netStart();
-  if (hiddenAt === null) return;
-  const away = (Date.now() - hiddenAt) / 1000;
-  hiddenAt = null; last = performance.now();
-  if (away > 90) { graceT = GRACE_SECS; showAway(simulateAway(away)); dailyBonus(); save(); }
-});
-window.turtle = { get turtles() { return turtles; }, get sel() { return sel; }, get ball() { return ball; }, get foods() { return foods; }, get poops() { return poops; }, bowl, grow: a => { use(sel); grow(a); }, simulateAway: secs => showAway(simulateAway(secs)), endGrace: () => { graceT = 0; }, addStars: n => { stars += n; }, cam, get up() { return up; }, get objs() { return objs; }, get crabs() { return crabs; }, get plots() { return plots; }, setHour: h => { hourOverride = h; }, get yards() { return yards; }, get yardIdx() { return yardIdx; }, switchYard: i => switchYard(i) };
-requestAnimationFrame(frame);
+if (LAB) import('./lab.js').then(m => m.start({
+  cv, ctx, makeTurtle, use, resetFeet, updateFeet, drawTurtle, sizeFor, stageOf, morphInfo, personality, randomName, randomTint, rollMorph, randomTraits,
+  MORPHS, TRAITS, KEEP, get T() { return T; },
+}));
+else {
+  resize(); // measures the HUD
+  const info = load();
+  rescaleToStandard();
+  const firstWorld = !base;
+  if (!base) base = { ...STD_BASE };
+  if (info.legacy) for (const p of [...turtles, ...poops, ...foods]) p.y -= TOP; // old saves used screen coordinates
+  if (!info.hadBowl) { bowl.x = base.w - 60; bowl.y = 58; }
+  if (info.fresh) { turtles[0].x = base.w / 2; turtles[0].y = base.h / 2; }
+  applyYard();
+  if (firstWorld) { cam.x = YW / 2; cam.y = YH / 2; cam.z = 1; clampCam(); }
+  for (const t of turtles) { use(t); resetFeet(); }
+  use(sel);
+  if (info.away > 90) showAway(simulateAway(info.away));
+  if (info.newStars) setTimeout(() => say('New: collect ⭐ by caring for your turtles. Tap ⭐ to shop!', 4000), 800);
+  dailyBonus();
+  renderPills();
+  ensurePlots(); syncCrabs();
+  addEventListener('resize', resize);
+  setInterval(save, 4000);
+  addEventListener('pagehide', save);
+  // Switching away from the app counts as being away: simulate that time when you come back.
+  let hiddenAt = null;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { if (visit) goHome(); hiddenAt = Date.now(); save(); snd.pause(); netStop(); return; }
+    snd.resume(); netStart();
+    if (hiddenAt === null) return;
+    const away = (Date.now() - hiddenAt) / 1000;
+    hiddenAt = null; last = performance.now();
+    if (away > 90) { graceT = GRACE_SECS; showAway(simulateAway(away)); dailyBonus(); save(); }
+  });
+  window.turtle = { get turtles() { return turtles; }, get sel() { return sel; }, get ball() { return ball; }, get foods() { return foods; }, get poops() { return poops; }, bowl, grow: a => { use(sel); grow(a); }, simulateAway: secs => showAway(simulateAway(secs)), endGrace: () => { graceT = 0; }, addStars: n => { stars += n; }, cam, get up() { return up; }, get objs() { return objs; }, get crabs() { return crabs; }, get plots() { return plots; }, setHour: h => { hourOverride = h; }, get yards() { return yards; }, get yardIdx() { return yardIdx; }, switchYard: i => switchYard(i) };
+  requestAnimationFrame(frame);
+}
