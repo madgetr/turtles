@@ -86,6 +86,17 @@ const DECOS = {
   stones: { name: 'Stepping stones', icon: '🪨', cost: 12 },
   bush: { name: 'Bush', icon: '🌿', cost: 15, tall: true },
   lantern: { name: 'Lantern', icon: '🏮', cost: 25, tall: true, light: true },
+  coral: { name: 'Coral', icon: '🪸', cost: 40, emoji: true, size: 40, tall: true },
+  rose: { name: 'Rose bush', icon: '🌹', cost: 35, emoji: true, size: 36, tall: true },
+  sunflower: { name: 'Sunflower', icon: '🌻', cost: 35, emoji: true, size: 42, tall: true },
+  cactus: { name: 'Cactus', icon: '🌵', cost: 45, emoji: true, size: 42, tall: true },
+  umbrella: { name: 'Beach umbrella', icon: '⛱️', cost: 45, emoji: true, size: 46, tall: true },
+  dotstone: { name: 'Ladybug stone', icon: '🐞', cost: 40, emoji: true, size: 30 },
+  amethyst: { name: 'Amethyst geode', icon: '🔮', cost: 70, emoji: true, size: 36, tall: true },
+  obsidian: { name: 'Obsidian rock', icon: '🌑', cost: 70, emoji: true, size: 32 },
+  rainbow: { name: 'Rainbow arch', icon: '🌈', cost: 160, emoji: true, size: 58, tall: true },
+  pearl: { name: 'Giant pearl', icon: '🦪', cost: 220, emoji: true, size: 36, desc: 'Very rare albino turtles love it.' },
+  idol: { name: 'Golden idol', icon: '🏆', cost: 300, emoji: true, size: 40, tall: true, desc: 'Said to bring golden hatchlings.' },
   castle: { name: 'Sandcastle', icon: '🏰', emoji: true, reward: true, tall: true },
   crystal: { name: 'Glowing crystal', icon: '💎', emoji: true, reward: true, tall: true, light: true },
   statue: { name: 'Stone statue', icon: '🗿', emoji: true, reward: true, tall: true },
@@ -1141,16 +1152,53 @@ const mix = (a, b, t, hue = 0, grey = 0, light = 0) => {
 };
 const G = () => T.growth;
 // ---------- rare looks: rolled once when a turtle hatches ----------
-const MORPHS = [ // [colour, chance, label, rarity]
-  ['normal', 0.70, '', 0], ['dark', 0.10, 'Dark shell', 1], ['olive', 0.07, 'Olive shell', 1], ['red', 0.05, 'Red shell', 2],
-  ['blue', 0.04, 'Blue-grey shell', 2], ['pale', 0.025, 'Pale', 2], ['albino', 0.01, 'Albino', 3], ['gold', 0.005, 'Golden', 4],
+const MORPHS = [ // [colour, base chance, label, rarity]. Decorations in the yard tilt these (see HATCH_BOOST).
+  ['normal', 0.51, '', 0], ['dark', 0.08, 'Dark shell', 1], ['olive', 0.07, 'Olive shell', 1], ['orange', 0.05, 'Orange shell', 1],
+  ['yellow', 0.04, 'Sunny yellow', 1], ['red', 0.04, 'Red shell', 2], ['teal', 0.035, 'Teal shell', 2], ['blue', 0.035, 'Blue-grey shell', 2],
+  ['navy', 0.03, 'Dark blue', 2], ['green', 0.03, 'Emerald', 2], ['pale', 0.025, 'Pale', 2], ['charcoal', 0.02, 'Jet black', 3],
+  ['purple', 0.015, 'Violet', 3], ['pink', 0.012, 'Pink', 3], ['albino', 0.005, 'Albino', 4], ['gold', 0.003, 'Golden', 4],
 ];
 const RARITY_NAMES = ['Common', 'Uncommon', 'Rare', 'Super rare', 'Legendary'];
-function rollMorph() {
+// What each thing in the yard does to a new hatchling's odds: key -> boost per item ('*' = every unusual colour).
+// Several of the same item stack with diminishing returns (see stackK).
+const HATCH_BOOST = {
+  flowers: { pink: 0.6, yellow: 0.4 }, mushrooms: { spots: 1.2, red: 0.4 }, shell: { pale: 0.8, albino: 0.4, teal: 0.4 },
+  stones: { dark: 0.8, charcoal: 0.6 }, bush: { olive: 0.8, green: 0.6 }, lantern: { orange: 0.8, gold: 0.25 },
+  tree: { olive: 0.5, green: 0.8 }, bbush: { purple: 0.8, stripes: 0.5 }, crystal: { purple: 0.8, albino: 0.8, gold: 0.4 },
+  coral: { navy: 2, blue: 1, teal: 1 }, cactus: { spikes: 2 }, umbrella: { stripes: 2 }, dotstone: { spots: 2 },
+  sunflower: { yellow: 1.5, orange: 1.5 }, rose: { red: 1.5, pink: 1.5 }, amethyst: { purple: 2, pink: 0.8 },
+  obsidian: { charcoal: 2, dark: 1, navy: 0.6 }, pearl: { albino: 2, pale: 1.5 }, idol: { gold: 2.5 }, rainbow: { '*': 0.6 },
+};
+const BOOST_STRUCT = { pond: { teal: 0.6, navy: 0.6, blue: 0.4 }, cave: { charcoal: 0.6, spikes: 0.5 } }; // placed structures count too
+const BOOST_NAMES = { spots: 'spots', stripes: 'stripes', spikes: 'spikes', '*': 'rare colours of every kind' };
+const boostName = k => BOOST_NAMES[k] || MORPHS.find(m => m[0] === k)[2].replace(' shell', '').toLowerCase();
+const stackK = n => (1 - 0.6 ** n) / 0.4; // 1 item = 1x its boost, 2 = 1.6x, 3 = 2x ... never more than 2.5x
+function hatchBoosts(list = objs) { // key -> multiplier on the base chance
+  const n = {};
+  for (const o of list) { const k = o.kind === 'deco' ? o.type : BOOST_STRUCT[o.kind] ? o.kind : null; if (k) n[k] = (n[k] || 0) + 1; }
+  const m = {};
+  for (const [k, cnt] of Object.entries(n)) for (const [key, b] of Object.entries(HATCH_BOOST[k] || BOOST_STRUCT[k] || {})) m[key] = (m[key] || 1) + b * stackK(cnt);
+  return m;
+}
+function hatchOdds(list = objs) { // { colors: [[colour, chance]], spots, stripes, spikes }
+  const m = hatchBoosts(list);
+  const w = MORPHS.map(([k, p]) => [k, k === 'normal' ? p : p * ((m[k] || 1) + (m['*'] || 1) - 1)]), tot = w.reduce((s, x) => s + x[1], 0);
+  const sp = 0.14 * (m.spots || 1), str = 0.1 * (m.stripes || 1), none = 0.76, pt = sp + str + none;
+  return { colors: w.map(([k, x]) => [k, x / tot]), spots: sp / pt, stripes: str / pt, spikes: Math.min(0.5, 0.04 * (m.spikes || 1)) };
+}
+function rollMorph(list = objs) {
+  const O = hatchOdds(list);
   let r = Math.random(), color = 'normal';
-  for (const [k, p] of MORPHS) { if ((r -= p) <= 0) { color = k; break; } }
-  const pr = Math.random(), pattern = pr < 0.15 ? 'spots' : pr < 0.25 ? 'stripes' : '';
-  return { color, pattern, spikes: Math.random() < 0.04 };
+  for (const [k, p] of O.colors) { if ((r -= p) <= 0) { color = k; break; } }
+  const pr = Math.random(), pattern = pr < O.spots ? 'spots' : pr < O.spots + O.stripes ? 'stripes' : '';
+  return { color, pattern, spikes: Math.random() < O.spikes };
+}
+function boostText(b) { return '🧬 Hatchlings: more ' + Object.keys(b).map(boostName).join(', '); }
+function yardBoostSummary() { // short line for the shop's adopt row
+  const m = hatchBoosts(), keys = Object.keys(m).sort((a, b) => m[b] - m[a]);
+  const O = hatchOdds(), rare = O.colors.filter(([k]) => MORPHS.find(x => x[0] === k)[3] >= 2).reduce((s, x) => s + x[1], 0);
+  return keys.length ? ` 🧬 Your decorations boost ${keys.slice(0, 4).map(boostName).join(', ')}${keys.length > 4 ? ' and more' : ''}. Rare colour chance ${(rare * 100).toFixed(0)}%.`
+    : ` 🧬 Decorations can make rare colours and patterns more likely.`;
 }
 function morphInfo(t) { // { label: 'Red shell · spotted · spiky', rarity: 0-4 }
   const m = t.morph || {}, row = MORPHS.find(x => x[0] === (m.color || 'normal')), bits = [];
@@ -1158,6 +1206,7 @@ function morphInfo(t) { // { label: 'Red shell · spotted · spiky', rarity: 0-4
   if (row && row[2]) bits.push(row[2]);
   if (m.pattern) { bits.push(m.pattern === 'spots' ? 'spotted' : 'striped'); rarity = Math.max(rarity, 1); }
   if (m.spikes) { bits.push('spiky'); rarity = Math.max(rarity, 2); }
+  if (row && row[3] >= 2 && (m.pattern || m.spikes) && rarity < 4) rarity++; // a rare colour with a pattern or spikes is a step rarer
   return { label: bits.join(' · '), rarity };
 }
 function announceMorph(t) {
@@ -1171,7 +1220,19 @@ const MORPH_SHELL = { // fixed shell palettes for the colours that aren't just a
   pale: { hi: ['#f4e9c8', '#cdbb94'], mid: ['#e2d3aa', '#ad9a72'], lo: ['#bfae86', '#7f6d4c'], scute: ['#eadcb4', '#b9a57e'], spine: ['#f0e5c4', '#c6b38c'], rim: ['#9e8b66', '#5c4e36'] },
   gold: { hi: ['#fff1a8', '#f2c94c'], mid: ['#f5d265', '#c99a1f'], lo: ['#d4a72a', '#8a6410'], scute: ['#f8dc72', '#d6a82a'], spine: ['#ffe58a', '#e2b53a'], rim: ['#9a7414', '#5a420a'] },
 };
-const MORPH_SKIN = { albino: { skin: ['#f6e4d8', '#ead0bf'], dark: ['#dcb8a6', '#c49c88'], light: ['#fff4ec', '#f6e2d4'] } };
+const hslHex = (h, s, l) => { // h 0-360, s/l 0-100 -> '#rrggbb'
+  l = clamp(l, 3, 97) / 100; const a = s / 100 * Math.min(l, 1 - l);
+  const f = n => { const k = (n + h / 30) % 12; return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, '0'); };
+  return `#${f(0)}${f(8)}${f(4)}`;
+};
+// The spectrum colours: a hue, saturation and baby/adult lightness, spread into the shell's parts.
+for (const [k, h, s, lb, la] of [['orange', 26, 78, 56, 36], ['yellow', 49, 82, 60, 42], ['teal', 178, 52, 48, 28], ['navy', 222, 62, 40, 22],
+  ['green', 142, 48, 46, 26], ['purple', 276, 42, 52, 30], ['pink', 336, 62, 70, 48], ['charcoal', 215, 8, 30, 13]]) {
+  const p = d => [hslHex(h, s, lb + d), hslHex(h, s, la + d * 0.8)];
+  MORPH_SHELL[k] = { hi: p(14), mid: p(2), lo: p(-12), scute: p(6), spine: p(10), rim: p(-24) };
+}
+const LIGHT_SHELL = new Set(['yellow', 'gold', 'pale', 'albino', 'pink']); // patterns go dark on these so they still show
+const MORPH_SKIN = { charcoal: { skin: ['#7d8a70', '#3e4636'], dark: ['#4a5440', '#21271c'], light: ['#a3b094', '#5d6852'] }, albino: { skin: ['#f6e4d8', '#ead0bf'], dark: ['#dcb8a6', '#c49c88'], light: ['#fff4ec', '#f6e2d4'] } };
 
 // Hatchlings: bright, round, big head and eyes, bit of eggshell. Juveniles: bold yellow rays on the shell.
 // Adults: dark, longer shell, growth rings, head stripes, long claws, moss and scratches.
@@ -1335,12 +1396,12 @@ function drawTurtle(time) {
   for (const [x, y, r, col] of scutes) { hex(c, x, y, r, Math.PI / 6); c.fillStyle = col; c.fill(); c.stroke(); }
   const Mo = T.morph || {};
   if (Mo.pattern === 'spots') { // little yellow spots on every scute
-    c.fillStyle = Mo.color === 'albino' ? 'rgba(230,170,140,0.9)' : 'rgba(250,214,92,0.9)';
+    c.fillStyle = Mo.color === 'albino' ? 'rgba(230,170,140,0.9)' : LIGHT_SHELL.has(Mo.color) ? 'rgba(90,52,20,0.75)' : 'rgba(250,214,92,0.9)';
     for (const [x, y, r] of scutes) for (let i = 0; i < 3; i++) { const a = i * 2.1 + x * 0.1; c.beginPath(); c.arc(x + Math.cos(a) * r * 0.45, y + Math.sin(a) * r * 0.45, Math.max(0.8, r * 0.15), 0, 7); c.fill(); }
   }
   if (Mo.pattern === 'stripes') { // bold stripes radiating across the shell
     c.save(); c.beginPath(); c.ellipse(0, 0, S, S * ar, 0, 0, 7); c.clip();
-    c.strokeStyle = 'rgba(240,200,70,0.75)'; c.lineWidth = Math.max(1, S * 0.07); c.lineCap = 'round';
+    c.strokeStyle = LIGHT_SHELL.has(Mo.color) ? 'rgba(90,52,20,0.6)' : 'rgba(240,200,70,0.75)'; c.lineWidth = Math.max(1, S * 0.07); c.lineCap = 'round';
     for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; c.beginPath(); c.moveTo(Math.cos(a) * S * 0.25, Math.sin(a) * S * ar * 0.25); c.lineTo(Math.cos(a) * S, Math.sin(a) * S * ar); c.stroke(); }
     c.restore();
   }
@@ -2731,7 +2792,7 @@ function drawDeco(o, time, dk) {
       c.beginPath(); c.arc(x, cy, R, -Math.PI / 2, -Math.PI / 2 + (1 - left / POWER_RECHARGE) * Math.PI * 2); c.stroke();
       if (pk === 'gems' && loot.boostUntil > Date.now()) drawText(c, textSprite(`⭐×2 · ${Math.ceil((loot.boostUntil - Date.now()) / 60e3)} min`, 'bold 11px system-ui', '#ffe27a', '#000a', 3), x, cy - R - 12);
     }
-    drawEmoji(c, DECOS[o.type].icon, x, y - 22, 52); return;
+    const sz = DECOS[o.type].size || 52; drawEmoji(c, DECOS[o.type].icon, x, y - sz * 0.42, sz); return;
   }
   if (o.type === 'flowers') {
     const cols = ['#f26d8f', '#f7d14a', '#b77df0', '#fff', '#ff8f4a'];
@@ -3478,7 +3539,7 @@ function buildShop() {
   const fits = YARDS[up.yard].fits;
   rows.push(turtles.length >= MAX_TURTLES ? { icon: '🥚', name: 'Adopt a hatchling', desc: 'Your yard is full of turtles!', done: 'Full' }
     : turtles.length >= fits ? { icon: '🥚', name: 'Adopt a hatchling', desc: `A ${YARDS[up.yard].name.toLowerCase()} yard has room for ${fits} turtles.`, locked: 'Needs a bigger yard' }
-      : { icon: '🥚', name: 'Adopt a hatchling', desc: 'A new baby turtle with its own personality and colors.', cost: adoptCost(), buy: adopt });
+      : { icon: '🥚', name: 'Adopt a hatchling', desc: 'A new baby turtle with its own personality and colors.' + yardBoostSummary(), cost: adoptCost(), buy: adopt });
   rows.push({ sec: '🏡 Yard' });
   rows.push(yNext
     ? { icon: '🏡', name: `${yNext.name} yard`, desc: `More room to roam, and space for ${yNext.fits} turtles.`, cost: yNext.cost, buy: () => { up.yard++; applyYard(); say('Bigger yard! Drag to look around · pinch to zoom', 3500); } }
@@ -3520,7 +3581,7 @@ function buildShop() {
   }
   rows.push({ sec: '🦋 Wildlife' });
   { const dd = DECOS.bbush, n = objs.filter(o => o.kind === 'deco' && o.type === 'bbush').length;
-    rows.push({ icon: dd.icon, name: dd.name, desc: dd.desc + (n ? ` You have ${n}.` : ''), cost: dd.cost + dd.step * n, buy: () => { const o = newObj('deco'); o.type = 'bbush'; o.seed = Math.random(); startPlacing(o); } }); }
+    rows.push({ icon: dd.icon, name: dd.name, desc: dd.desc + ' ' + boostText(HATCH_BOOST.bbush) + '.' + (n ? ` You have ${n}.` : ''), cost: dd.cost + dd.step * n, buy: () => { const o = newObj('deco'); o.type = 'bbush'; o.seed = Math.random(); startPlacing(o); } }); }
   for (const [k, w] of Object.entries(WILD)) {
     const lv = up[k === 'birdfeeder' ? 'birds' : k === 'lily' ? 'lily' : 'bugs'], key = k === 'birdfeeder' ? 'birds' : k === 'lily' ? 'lily' : 'bugs';
     if (lv >= w.costs.length) { rows.push({ icon: w.icon, name: w.name, desc: 'All the critters it can attract.', done: 'Maxed' }); continue; }
@@ -3532,7 +3593,7 @@ function buildShop() {
   for (const [k, dd] of Object.entries(DECOS)) {
     if (dd.reward || dd.wild) continue; // earned from the collection book / sold under Wildlife
     const n = objs.filter(o => o.kind === 'deco' && o.type === k).length;
-    rows.push({ icon: dd.icon, name: dd.name, desc: (dd.desc ? dd.desc + ' ' : '') + (dd.light ? 'Glows at night. ' : '') + (n ? `You have ${n}.` : 'Buy as many as you like.'), cost: dd.cost + (dd.step || 0) * n, buy: () => { const o = newObj('deco'); o.type = k; o.seed = Math.random(); startPlacing(o); } });
+    rows.push({ icon: dd.icon, name: dd.name, desc: (dd.desc ? dd.desc + ' ' : '') + (HATCH_BOOST[k] ? boostText(HATCH_BOOST[k]) + '. ' : '') + (dd.light ? 'Glows at night. ' : '') + (n ? `You have ${n}.` : 'Buy as many as you like.'), cost: dd.cost + (dd.step || 0) * n, buy: () => { const o = newObj('deco'); o.type = k; o.seed = Math.random(); startPlacing(o); } });
   }
   return rows;
 }
@@ -4367,6 +4428,6 @@ else {
     hiddenAt = null; last = performance.now();
     if (away > 90) { graceT = GRACE_SECS; showAway(simulateAway(away)); dailyBonus(); save(); }
   });
-  window.turtle = { get turtles() { return turtles; }, get sel() { return sel; }, get ball() { return ball; }, get foods() { return foods; }, get poops() { return poops; }, bowl, grow: a => { use(sel); grow(a); }, simulateAway: secs => showAway(simulateAway(secs)), endGrace: () => { graceT = 0; }, addStars: n => { stars += n; }, cam, get up() { return up; }, get objs() { return objs; }, get crabs() { return crabs; }, get plots() { return plots; }, setHour: h => { hourOverride = h; }, get yards() { return yards; }, get yardIdx() { return yardIdx; }, switchYard: i => switchYard(i) };
+  window.turtle = { get turtles() { return turtles; }, get sel() { return sel; }, get ball() { return ball; }, get foods() { return foods; }, get poops() { return poops; }, bowl, grow: a => { use(sel); grow(a); }, simulateAway: secs => showAway(simulateAway(secs)), endGrace: () => { graceT = 0; }, addStars: n => { stars += n; }, cam, get up() { return up; }, get objs() { return objs; }, get crabs() { return crabs; }, get plots() { return plots; }, setHour: h => { hourOverride = h; }, get yards() { return yards; }, get yardIdx() { return yardIdx; }, switchYard: i => switchYard(i), hatchOdds: () => hatchOdds(), rollMorph: () => rollMorph() };
   requestAnimationFrame(frame);
 }
