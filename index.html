@@ -1235,6 +1235,19 @@
       color: #6b6a55;
     }
 
+    #wild { position: fixed; inset: 0; z-index: 8; background: #2f4d1c; touch-action: none; }
+    #wild[hidden] { display: none; }
+    #wild-c { width: 100%; height: 100%; display: block; }
+    #wild-top { position: absolute; top: calc(env(safe-area-inset-top) + 10px); left: 10px; right: 10px; display: flex; justify-content: space-between; pointer-events: none; }
+    #wild-top > * { pointer-events: auto; background: #000a; color: #fff; border: 0; border-radius: 14px; padding: 8px 14px; font-size: 15px; }
+    #wild-panel { position: absolute; left: 10px; right: 10px; bottom: calc(env(safe-area-inset-bottom) + 12px); background: #fffbeef0; border-radius: 16px; padding: 10px 14px; text-align: center; color: #333; }
+    #wild-panel[hidden] { display: none; }
+    #wild-panel b { display: block; font-size: 17px; }
+    #wild-panel small { display: block; opacity: .75; }
+    #wild-panel .nets { display: flex; gap: 6px; margin-top: 8px; }
+    #wild-panel .nets button { flex: 1; border: 0; border-radius: 12px; padding: 8px 4px; background: #3f8a33; color: #fff; font-size: 13px; }
+    #wild-panel .nets button:disabled { background: #aaa; }
+    #hint { z-index: 20; }
     #hint {
       position: fixed;
       left: 50%;
@@ -1619,6 +1632,11 @@ body.visiting #paintbar {
         class="brush">Brush</button><button class="done">✓ Done</button></div>
   </div>
   <button id="arrange-done" hidden>✓ Done arranging</button>
+  <div id="wild" hidden>
+    <canvas id="wild-c"></canvas>
+    <div id="wild-top"><button id="wild-close">← Home</button><span id="wild-nets"></span></div>
+    <div id="wild-panel"></div>
+  </div>
   <div id="hint"></div>
   <div id="swipehint" hidden></div>
   <div id="shop" hidden>

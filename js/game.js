@@ -404,6 +404,7 @@ const SAVE3 = 'turtle-save-v3', SAVE = 'turtle-save-v2', OLD_SAVE = 'turtle-save
 const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud', 'chub', 'diet', 'born', 'arrived', 'morph'];
 let yards = [null], yardIdx = 0, yardName = 'My Yard';
 const packTurtle = t => Object.fromEntries(KEEP.map(k => [k, t[k]]));
+let wildPool = [], wildNets = [0, 0, 0]; // released + native wild turtles (shared across yards), nets owned per tier
 const own = t => t.releasing === undefined && !t.guest; // your turtles (not fading away, not a friend's visiting turtle)
 function packYard() {
   return {
@@ -455,7 +456,7 @@ function save() {
   yards[yardIdx] = visit?.home || packYard(); // visiting a friend: your own yard waits in visit.home
   localStorage.setItem(SAVE3, JSON.stringify({
     v: 3, yards, active: yardIdx, base, t: Date.now(),
-    shared: { stars, lastDaily, loot, ...Object.fromEntries(SHARED_UP.map(k => [k, up[k]])) },
+    shared: { stars, lastDaily, loot, wildPool, wildNets, ...Object.fromEntries(SHARED_UP.map(k => [k, up[k]])) },
   }));
 }
 // Loads the save. Returns { away (seconds), fresh, legacy (old screen coordinates), newStars }.
@@ -466,6 +467,7 @@ function load() {
     const sh = d3.shared || {};
     base = d3.base || null; stars = sh.stars ?? 30; lastDaily = sh.lastDaily || '';
     loot = { ...loot, ...(sh.loot || {}) };
+    wildPool = sh.wildPool || []; wildNets = sh.wildNets || [0, 0, 0];
     for (const k of SHARED_UP) if (sh[k] !== undefined) up[k] = sh[k];
     yards = d3.yards; yardIdx = clamp(d3.active | 0, 0, yards.length - 1);
     const y = yards[yardIdx];
@@ -1265,8 +1267,8 @@ function hex(c, x, y, r, rot = 0) {
   c.closePath();
 }
 
-function drawTurtle(time) {
-  const c = ctx, g = G(), L = look(g), wide = 1 + 0.25 * T.chub;
+function drawTurtle(time, c = ctx) {
+  const g = G(), L = look(g), wide = 1 + 0.25 * T.chub;
   const shiver = st.warm < MOOD.cold && !T.rest ? Math.sin(time * 55) * Math.max(0.6, S * 0.03) : 0; // cold: little shivers
   c.save(); c.translate(shiver, 0);
   if (turtles.length > 1 && T === sel && picked) { // selection ring
@@ -1463,7 +1465,7 @@ function drawTurtle(time) {
   const crave = st.hunger < 85 && craving(T);
   const need = st.health < SICK ? '🤒' : st.hunger < 30 ? '🥬' : st.thirst < 30 ? '💧' : poops.length >= 3 ? '🧹' : st.warm < MOOD.cold ? '🥶' : st.energy < MOOD.tired ? '💤'
     : st.social < MOOD.lonely ? '🤗' : crave ? (crave === 'berry' ? '🍓' : '🥗') : st.happy < 25 ? '🎾' : T.mud > 0 && T.mud < 0.75 ? '🛁' : null;
-  if (need && !T.eat && T.drinkT <= 0 && T.rest?.kind !== 'sleep') {
+  if (need && !T.wild && !T.eat && T.drinkT <= 0 && T.rest?.kind !== 'sleep') {
     const bx = T.x + S * 0.9 + 6, by = T.y - S * 1.5 - 8 + Math.sin(time * 3) * 3;
     c.fillStyle = '#fffe'; c.beginPath(); c.arc(bx, by, 17, 0, 7); c.fill();
     c.beginPath(); c.arc(bx - 12, by + 16, 4, 0, 7); c.fill();
@@ -2371,9 +2373,9 @@ function addTileShape(path, x, y, rad, same, c, r) {
   if (s2 && e && !same(c + 1, r + 1)) fillet(x + TILE, y + TILE, 1, 1);
   if (s2 && w && !same(c - 1, r + 1)) fillet(x, y + TILE, -1, 1);
 }
-function buildChunk(cx, cy) {
+function buildChunk(cx, cy, gmap = ground) {
   const layers = {}, L = (name, kind, col, extra) => (layers[name + kind + col] ??= { z: LAYERS.indexOf(name) * 10 + (kind === 'rim' ? 0 : kind === 'fill' ? 1 : kind === 'dots' ? 2 : 3), kind, col, path: new Path2D(), ...extra });
-  const typeAt = (c, r) => ground[`${c},${r}`];
+  const typeAt = (c, r) => gmap[`${c},${r}`];
   for (let c = cx * CHUNK; c < (cx + 1) * CHUNK; c++) for (let r = cy * CHUNK; r < (cy + 1) * CHUNK; r++) {
     const t = typeAt(c, r); if (!t) continue;
     const G = GROUND[t], x = c * TILE, y = r * TILE, rnd = tileRand(c, r);
@@ -2404,15 +2406,18 @@ function drawGround(v) {
     for (const k of keys) { const [cx, cy] = k.split(',').map(Number); gChunks.set(k, buildChunk(cx, cy)); }
   } else for (const k of gDirty) { const [cx, cy] = k.split(',').map(Number); gChunks.set(k, buildChunk(cx, cy)); }
   gDirty.clear();
-  // Layer by layer across every visible chunk (not chunk by chunk), so one chunk's bank can't cover its neighbour's water.
+  drawChunks(gChunks, v, ctx);
+}
+// Layer by layer across every visible chunk (not chunk by chunk), so one chunk's bank can't cover its neighbour's water.
+function drawChunks(chunks, v, c) {
   const span = CHUNK * TILE, ops = [];
-  for (const [k, list] of gChunks) {
+  for (const [k, list] of chunks) {
     const [cx, cy] = k.split(',').map(Number);
     if (cx * span > v.x1 + 30 || (cx + 1) * span < v.x0 - 30 || cy * span > v.y1 + 30 || (cy + 1) * span < v.y0 - 30) continue;
     for (const o of list) ops.push(o);
   }
   ops.sort((a, b) => a.z - b.z);
-  const c = ctx; c.lineJoin = 'round';
+  c.lineJoin = 'round';
   for (const o of ops) {
     if (o.kind === 'rim') { c.strokeStyle = o.col; c.lineWidth = o.w; c.stroke(o.path); }
     else if (o.kind === 'lines') { c.strokeStyle = o.col; c.lineWidth = 1.2; c.stroke(o.path); }
@@ -3516,9 +3521,10 @@ document.getElementById('m-release').onclick = () => {
   menu.hidden = true;
   if (turtles.length < 2) return;
   const t = sel;
-  askConfirm(`Release ${t.name}?`, `${t.name} will go back to the wild. This can't be undone.`, '🌿 Release', () => {
+  askConfirm(`Release ${t.name}?`, `${t.name} will go back to the wild. You can try to catch them again there with a net — the longer they're out, the wilder they get.`, '🌿 Release', () => {
     if (!turtles.includes(t) || turtles.length < 2) return;
     t.releasing = 1; // fades out, then is removed in the loop
+    releaseToWild(t);
     emit(t.x, t.y, 'sparkle', 12); emit(t.x, t.y - t.S, 'heart', 3);
     sel = turtles.find(o => o !== t);
     say(`Bye ${t.name}! 🌿`); buzz(20);
@@ -3595,6 +3601,7 @@ function buildShop() {
     const n = objs.filter(o => o.kind === 'deco' && o.type === k).length;
     rows.push({ icon: dd.icon, name: dd.name, desc: (dd.desc ? dd.desc + ' ' : '') + (HATCH_BOOST[k] ? boostText(HATCH_BOOST[k]) + '. ' : '') + (dd.light ? 'Glows at night. ' : '') + (n ? `You have ${n}.` : 'Buy as many as you like.'), cost: dd.cost + (dd.step || 0) * n, buy: () => { const o = newObj('deco'); o.type = k; o.seed = Math.random(); startPlacing(o); } });
   }
+  wildShopRows(rows);
   return rows;
 }
 // a placed thing: offer the next size up, if there is one
@@ -4431,3 +4438,265 @@ else {
   window.turtle = { get turtles() { return turtles; }, get sel() { return sel; }, get ball() { return ball; }, get foods() { return foods; }, get poops() { return poops; }, bowl, grow: a => { use(sel); grow(a); }, simulateAway: secs => showAway(simulateAway(secs)), endGrace: () => { graceT = 0; }, addStars: n => { stars += n; }, cam, get up() { return up; }, get objs() { return objs; }, get crabs() { return crabs; }, get plots() { return plots; }, setHour: h => { hourOverride = h; }, get yards() { return yards; }, get yardIdx() { return yardIdx; }, switchYard: i => switchYard(i), hatchOdds: () => hatchOdds(), rollMorph: () => rollMorph() };
   requestAnimationFrame(frame);
 }
+
+// ---------- the wild: released turtles (plus a few natives) roam a big meadow; catch them back with nets ----------
+const FERAL_DAYS = 60, WILD_CAP = 40, WILD_NATIVES = 4;
+const NETS = [ // tier 1..3: odds on a freshly released turtle (hi) and a fully feral one (lo)
+  null, { name: 'Basic net', cost: 120, hi: 0.9, lo: 0.12 }, { name: 'Sturdy net', cost: 300, hi: 0.95, lo: 0.3 }, { name: 'Master net', cost: 750, hi: 0.99, lo: 0.55 },
+];
+const wildnessOf = w => (w.origin === 'native' ? 1 : clamp((Date.now() - (w.releasedAt || 0)) / (FERAL_DAYS * 864e5), 0, 1));
+function catchOddsFor(w, netTier) {
+  const n = NETS[netTier]; if (!n) return 0;
+  const x = wildnessOf(w);
+  if (x <= 0.12) return lerp(n.hi, n.hi - 0.05, x / 0.12); // first ~7 days: still remembers you
+  return lerp(n.hi - 0.05, n.lo, Math.sqrt((x - 0.12) / 0.88));
+}
+function pruneWild() { // soft cap: drop the oldest natives first; released turtles are never thrown away
+  const natives = wildPool.filter(w => w.origin === 'native').sort((a, b) => (a.releasedAt || 0) - (b.releasedAt || 0));
+  while (wildPool.length > WILD_CAP && natives.length) wildPool.splice(wildPool.indexOf(natives.shift()), 1);
+}
+const wildId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+function releaseToWild(t) {
+  const now = Date.now();
+  wildPool.push({ ...packTurtle(t), id: wildId(), origin: 'released', releasedAt: now, lastSeenAt: now, sightings: 0 });
+  pruneWild(); save();
+}
+function seedNatives() {
+  while (wildPool.filter(w => w.origin === 'native').length < WILD_NATIVES) {
+    const t = makeTurtle({ growth: rand(0.25, 1), morph: rollMorph([]) });
+    wildPool.push({ ...packTurtle(t), id: wildId(), origin: 'native', releasedAt: Date.now() - rand(0, 30) * 864e5, lastSeenAt: 0, sightings: 0 });
+  }
+  pruneWild();
+}
+const yardRoom = () => Math.min(MAX_TURTLES, YARDS[up.yard].fits) - turtles.filter(own).length;
+// Returns { ok, turtle } on a catch, { ok: false, escaped: true } on a miss, or { ok: false, why } if it couldn't try.
+function catchWildTurtle(id, netTier) {
+  const w = wildPool.find(o => o.id === id);
+  if (!w) return { ok: false, why: 'gone' };
+  if (!(wildNets[netTier - 1] > 0)) return { ok: false, why: 'No nets of that kind' };
+  if (yardRoom() <= 0) return { ok: false, why: 'No room in this yard' };
+  wildNets[netTier - 1]--;
+  w.lastSeenAt = Date.now();
+  if (Math.random() >= catchOddsFor(w, netTier)) { save(); return { ok: false, escaped: true }; }
+  wildPool.splice(wildPool.indexOf(w), 1);
+  const { id: _i, origin, releasedAt, lastSeenAt, sightings, ...rest } = w;
+  const t = makeTurtle({ ...rest, gut: [], x: clamp(cam.x + rand(-60, 60), 60, YW - 60), y: clamp(cam.y + rand(-60, 60), 60, YH - 60), a: rand(-3, 3),
+    tint: rest.tint || pickTint(turtles), arrived: Date.now() });
+  turtles.push(t); use(t); resetFeet(); use(sel);
+  save();
+  return { ok: true, turtle: t };
+}
+function wildShopRows(rows) {
+  rows.push({ sec: `🌲 The Wild · ${wildNets.map((n, i) => `${netSvg(i + 1)} ${n}`).join(' ')}` });
+  rows.push({ icon: '🌲', name: 'Visit the wild', desc: 'Released turtles roam here. Bring a net to catch one back.', btn: 'Go', action: () => { shop.hidden = true; openWild(); } });
+  for (let k = 1; k <= 3; k++) {
+    const n = NETS[k];
+    rows.push({ icon: netSvg(k), name: `${n.name} (have ${wildNets[k - 1]})`, desc: `One throw. ~${Math.round(n.hi * 100)}% on a freshly released turtle, ~${Math.round(n.lo * 100)}% on a fully wild one.`,
+      cost: n.cost, buy: () => { wildNets[k - 1]++; say(`${n.name} ready`); } });
+  }
+}
+
+// --- the meadow scene (its own canvas; pan + pinch zoom like the yard; turtles use the shared drawTurtle) ---
+const wildEl = document.getElementById('wild'), wcv = document.getElementById('wild-c'), wctx = wcv.getContext('2d');
+const WW = 3200, WH = 3200;
+const wild = { open: false, cam: { x: WW / 2, y: WH / 2, z: 1 }, ground: {}, chunks: null, trees: [], tufts: [], walkers: [], pick: null, raf: 0, last: 0, d: 1 };
+const wTile = (x, y) => wild.ground[`${Math.floor(x / TILE)},${Math.floor(y / TILE)}`];
+const inLake = (p, pad = 0) => [[0, 0], [pad, 0], [-pad, 0], [0, pad], [0, -pad]].some(([dx, dy]) => wTile(p.x + dx, p.y + dy) === 'water');
+{ // same meadow every visit, painted with the yard's ground tiles
+  let s = 7331; const R = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const blob = (type, n, rMin, rMax, overwrite) => {
+    for (let i = 0; i < n; i++) {
+      const x = 300 + R() * (WW - 600), y = 300 + R() * (WH - 600), rx = rMin + R() * (rMax - rMin), ry = rx * (0.55 + R() * 0.45), a = R() * 3;
+      const ca = Math.cos(-a), sa = Math.sin(-a), ext = Math.ceil(rx / TILE) + 1, c0 = Math.floor(x / TILE), r0 = Math.floor(y / TILE);
+      for (let c = c0 - ext; c <= c0 + ext; c++) for (let r = r0 - ext; r <= r0 + ext; r++) {
+        const dx = (c + 0.5) * TILE - x, dy = (r + 0.5) * TILE - y, u = dx * ca - dy * sa, v = dx * sa + dy * ca;
+        const k = `${c},${r}`;
+        if ((u / rx) ** 2 + (v / ry) ** 2 < 1 && (overwrite || !wild.ground[k])) wild.ground[k] = type;
+      }
+    }
+  };
+  wild.ground = {};
+  blob('water', 7, 140, 320, true);
+  blob('dirt', 22, 50, 150, false);
+  blob('moss', 12, 80, 200, false);
+  blob('meadow', 8, 60, 160, false);
+  blob('gravel', 5, 40, 90, false);
+  for (let i = 0; i < 1400; i++) { const p = { x: R() * WW, y: R() * WH, k: R() }; if (!wTile(p.x, p.y)) wild.tufts.push(p); }
+  for (let i = 0; i < 170; i++) { const t = { x: R() * WW, y: R() * WH, r: 34 + R() * 40, h: R() }; if (!inLake(t, t.r * 0.6)) wild.trees.push(t); }
+  wild.chunks = new Map();
+  const keys = new Set(Object.keys(wild.ground).map(k => { const [c, r] = k.split(',').map(Number); return `${Math.floor(c / CHUNK)},${Math.floor(r / CHUNK)}`; }));
+  for (const k of keys) { const [cx, cy] = k.split(',').map(Number); wild.chunks.set(k, buildChunk(cx, cy, wild.ground)); }
+}
+function grassSpot() { for (let i = 0; i < 50; i++) { const p = { x: rand(150, WW - 150), y: rand(150, WH - 150) }; if (!inLake(p, 40)) return p; } return { x: WW / 2, y: WH / 2 }; }
+const wZmin = () => Math.max(0.35, innerWidth / WW, innerHeight / WH), wZmax = 2.5;
+function wClamp() {
+  const C = wild.cam; C.z = clamp(C.z, wZmin(), wZmax);
+  const hw = innerWidth / 2 / C.z, hh = innerHeight / 2 / C.z;
+  C.x = clamp(C.x, hw, WW - hw); C.y = clamp(C.y, hh, WH - hh);
+}
+const wS2W = (sx, sy) => ({ x: wild.cam.x + (sx - innerWidth / 2) / wild.cam.z, y: wild.cam.y + (sy - innerHeight / 2) / wild.cam.z });
+function openWild() {
+  if (visit || LAB) return;
+  seedNatives();
+  wild.cam = { x: WW / 2, y: WH / 2, z: 1 };
+  const pool = [...wildPool].sort(() => Math.random() - 0.5), n = Math.min(pool.length, 1 + (Math.random() < 0.6) + (Math.random() < 0.25));
+  wild.walkers = pool.slice(0, n).map(w => {
+    let p = grassSpot();
+    for (let i = 0; i < 20 && dist(p, wild.cam) < 600; i++) p = grassSpot(); // few and far between: not right where you start
+    const { id, origin, releasedAt, lastSeenAt, sightings, ...rest } = w;
+    const t = makeTurtle({ ...rest, gut: [], x: p.x, y: p.y, a: rand(-3, 3), st: { hunger: 100, thirst: 100, happy: 80, health: 100, social: 80, energy: 90, warm: 90 } });
+    t.wild = w; t.tgt = null; t.idle = rand(0, 3); t.flee = 0;
+    use(t); resetFeet();
+    w.sightings = (w.sightings || 0) + 1; w.lastSeenAt = Date.now();
+    return t;
+  });
+  use(sel); save();
+  wild.pick = null; wild.throwing = null; renderWildPanel();
+  wildEl.hidden = false; wild.open = true; wildResize();
+  wild.last = performance.now(); wild.raf = requestAnimationFrame(wildFrame);
+  say(wild.walkers.length ? '🌲 Something is moving out there… drag to explore · pinch to zoom' : '🌲 It\'s quiet today', 3000);
+}
+function closeWild() { wild.open = false; wildEl.hidden = true; cancelAnimationFrame(wild.raf); }
+function wildResize() { const d = Math.min(devicePixelRatio || 1, 2); wcv.width = innerWidth * d; wcv.height = innerHeight * d; wild.d = d; wClamp(); }
+addEventListener('resize', () => { if (wild.open) wildResize(); });
+function wildFrame(now) {
+  if (!wild.open) return;
+  const dt = clamp((now - wild.last) / 1000, 0, 0.05); wild.last = now;
+  for (const t of wild.walkers) { // slow wandering
+    let want = null;
+    if (t.held) t.v = 0;
+    else if (t.flee > 0) { t.flee -= dt; t.v = lerp(t.v, 90, dt * 4); if (t.flee <= 0) t.gone = true; }
+    else if (t.tgt) {
+      want = Math.atan2(t.tgt.y - t.y, t.tgt.x - t.x);
+      const da = ((want - t.a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      t.a += clamp(da, -1.5 * dt, 1.5 * dt);
+      t.v = lerp(t.v, Math.abs(da) < 0.6 ? 22 + 14 * t.traits.speed : 4, dt * 3);
+      if (dist(t, t.tgt) < 12) { t.tgt = null; t.idle = rand(2, 7); }
+    } else {
+      t.v = lerp(t.v, 0, dt * 4);
+      if ((t.idle -= dt) <= 0) {
+        const a = rand(0, 6.28), d = rand(80, 260);
+        t.tgt = { x: clamp(t.x + Math.cos(a) * d, 100, WW - 100), y: clamp(t.y + Math.sin(a) * d, 100, WH - 100) };
+        if (inLake(t.tgt, 20)) { t.tgt = null; t.idle = 0.5; }
+      }
+    }
+    t.x += Math.cos(t.a) * t.v * dt; t.y += Math.sin(t.a) * t.v * dt;
+    use(t); updateFeet(dt);
+  }
+  use(sel); throwStep(dt);
+  wild.walkers = wild.walkers.filter(t => !t.gone);
+  drawWild(now / 1000);
+  wild.raf = requestAnimationFrame(wildFrame);
+}
+function drawWild(time) {
+  const c = wctx, d = wild.d, C = wild.cam, vw = innerWidth / C.z, vh = innerHeight / C.z, ox = C.x - vw / 2, oy = C.y - vh / 2;
+  const vis = (x, y, r) => x + r > ox && x - r < ox + vw && y + r > oy && y - r < oy + vh;
+  c.setTransform(d * C.z, 0, 0, d * C.z, -ox * d * C.z, -oy * d * C.z);
+  c.fillStyle = GROUND.grass.col; c.fillRect(ox, oy, vw, vh);
+  drawChunks(wild.chunks, { x0: ox, y0: oy, x1: ox + vw, y1: oy + vh }, c);
+  c.lineWidth = 2;
+  if (C.z > 0.5) for (const p of wild.tufts) if (vis(p.x, p.y, 8)) {
+    c.strokeStyle = p.k > 0.5 ? '#6a9a40' : '#93c25e';
+    c.beginPath(); c.moveTo(p.x - 4, p.y); c.lineTo(p.x - 6, p.y - 7); c.moveTo(p.x, p.y); c.lineTo(p.x, p.y - 9); c.moveTo(p.x + 4, p.y); c.lineTo(p.x + 6, p.y - 7); c.stroke();
+  }
+  for (const t of wild.walkers) if (vis(t.x, t.y, t.S * 3)) {
+    if (wild.pick === t) { c.strokeStyle = '#fff'; c.lineWidth = 2.5; c.setLineDash([6, 5]); c.lineDashOffset = -time * 12; c.beginPath(); c.ellipse(t.x, t.y, t.S * 1.6, t.S * 1.5, t.a, 0, 7); c.stroke(); c.setLineDash([]); }
+    use(t); c.save(); drawTurtle(time, c); c.restore();
+  }
+  use(sel);
+  for (const t of wild.trees) if (vis(t.x, t.y, t.r * 1.3)) {
+    c.fillStyle = '#00000033'; c.beginPath(); c.ellipse(t.x + 10, t.y + 12, t.r, t.r * 0.8, 0, 0, 7); c.fill();
+    c.fillStyle = t.h > 0.5 ? '#2f6b26' : '#3b7a2a'; c.beginPath(); c.arc(t.x, t.y, t.r, 0, 7); c.fill();
+    c.fillStyle = t.h > 0.5 ? '#3f8a33' : '#4f9636'; c.beginPath(); c.arc(t.x - t.r * 0.25, t.y - t.r * 0.25, t.r * 0.6, 0, 7); c.fill();
+  }
+  const th = wild.throwing; // the net drops over the turtle, then lifts (miss) or stays (catch)
+  if (th) {
+    const k = clamp(th.age / 0.5, 0, 1), lift = !th.ok && th.age > 0.9 ? clamp((th.age - 0.9) / 0.4, 0, 1) : 0;
+    c.globalAlpha = 1 - lift; drawNet(c, th.t.x, th.t.y - lift * 60, th.t.S * 1.7 * (1 + (1 - k) * 0.8), -0.5 + (1 - k) * 0.6, th.tier); c.globalAlpha = 1;
+  }
+}
+// a hand-held fishing net seen from above: wooden handle, round hoop, string mesh
+function drawNet(c, x, y, r, a, tier = 1) {
+  c.save(); c.translate(x, y); c.rotate(a);
+  c.lineCap = 'round';
+  c.strokeStyle = '#6b4a2a'; c.lineWidth = r * 0.16; c.beginPath(); c.moveTo(r * 0.95, r * 0.2); c.lineTo(r * 2.6, r * 0.9); c.stroke();
+  c.strokeStyle = '#8a6238'; c.lineWidth = r * 0.09; c.beginPath(); c.moveTo(r * 0.95, r * 0.2); c.lineTo(r * 2.6, r * 0.9); c.stroke();
+  c.save(); c.beginPath(); c.arc(0, 0, r, 0, 7); c.clip();
+  c.fillStyle = '#ffffff22'; c.fill();
+  const NC = NET_COL[tier] || NET_COL[1];
+  c.strokeStyle = NC.mesh; c.lineWidth = Math.max(1, r * 0.035);
+  const step = r / (3 + tier);
+  c.beginPath();
+  for (let i = -r; i <= r; i += step) { c.moveTo(i - r, -r); c.lineTo(i + r, r); c.moveTo(i + r, -r); c.lineTo(i - r, r); }
+  c.stroke(); c.restore();
+  c.strokeStyle = NC.hoop; c.lineWidth = r * 0.1; c.beginPath(); c.arc(0, 0, r, 0, 7); c.stroke();
+  c.restore();
+}
+const NET_COL = [null, { hoop: '#7a4f28', mesh: '#c49a6c' }, { hoop: '#c9a227', mesh: '#ffe08a' }, { hoop: '#7b3fb8', mesh: '#cfa8f5' }]; // brown, gold, purple
+const netSvg = (tier = 1) => { const C = NET_COL[tier]; return `<svg viewBox="0 0 24 24" width="1.2em" height="1.2em" style="vertical-align:-.25em"><line x1="14" y1="14" x2="22" y2="22" stroke="#7a5230" stroke-width="2.6" stroke-linecap="round"/><circle cx="9" cy="9" r="7" fill="#fff3" stroke="${C.hoop}" stroke-width="1.8"/><path d="M4 6l10 10M2.5 10l7.5 7.5M6 3l11 11M10 2.5l7.5 7.5M14 4L4 14M17 6L6 17M12 2.6L2.6 12M16.5 10L10 16.5" stroke="${C.mesh}" stroke-width=".9"/></svg>`; };
+const agoText = ms => { const d = Math.round(ms / 864e5); return d < 1 ? `${Math.max(1, Math.round(ms / 36e5))} h` : `${d} day${d === 1 ? '' : 's'}`; };
+function renderWildPanel() {
+  const p = document.getElementById('wild-panel'), t = wild.pick;
+  document.getElementById('wild-nets').innerHTML = wildNets.map((n, i) => `${netSvg(i + 1)} ${n}`).join(' &nbsp;');
+  p.hidden = !t; if (!t) return;
+  const w = t.wild, x = wildnessOf(w), mood = x <= 0.12 ? 'Still tame' : x < 0.5 ? 'Getting wild' : x < 1 ? 'Wild' : 'Feral';
+  const who = w.origin === 'native' ? 'A wild native turtle' : `Released ${agoText(Date.now() - w.releasedAt)} ago`;
+  p.innerHTML = `<b>${w.name}</b><small>${who} · ${mood}</small><div class="nets">${[1, 2, 3].map(k =>
+    `<button data-k="${k}" ${wildNets[k - 1] ? '' : 'disabled'}>${netSvg(k)} ${NETS[k].name} ×${wildNets[k - 1]}<br>${Math.round(catchOddsFor(w, k) * 100)}%</button>`).join('')}</div>`;
+}
+document.getElementById('wild-panel').addEventListener('click', e => {
+  const k = +e.target.closest('button')?.dataset.k, t = wild.pick; if (!k || !t || wild.throwing) return;
+  const r = catchWildTurtle(t.wild.id, k);
+  if (r.why) return say(r.why === 'gone' ? 'It wandered off' : r.why, 2200);
+  t.tgt = null; t.v = 0; t.held = true; buzz(20);
+  wild.throwing = { t, tier: k, ok: r.ok, age: 0, name: r.ok ? r.turtle.name : t.wild.name };
+  wild.pick = null; renderWildPanel();
+});
+function throwStep(dt) { // net animation; the catch itself was already rolled
+  const th = wild.throwing; if (!th) return;
+  th.age += dt;
+  if (th.age > 0.6 && !th.said) {
+    th.said = true;
+    if (th.ok) { snd.play('buy'); buzz([30, 50, 30]); say(`Caught ${th.name}! They're back in ${yardName}`, 3000); }
+    else { buzz(60); say(`💨 ${th.name} wriggled out of the net and ran off!`, 2600); }
+  }
+  if (!th.ok && th.age > 0.9 && th.t.held) { const t = th.t; t.held = false; t.flee = 2; t.a = Math.atan2(t.y - wild.cam.y, t.x - wild.cam.x) + rand(-0.4, 0.4); }
+  if (th.age > (th.ok ? 1.6 : 1.3)) { if (th.ok) wild.walkers.splice(wild.walkers.indexOf(th.t), 1); wild.throwing = null; }
+}
+document.getElementById('wild-close').onclick = closeWild;
+{ // one finger pans, two fingers pinch-zoom (and pan), wheel zooms, a short tap picks a turtle
+  const ptrs = new Map(); let g = null;
+  const mid = () => { const [a, b] = [...ptrs.values()]; return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)) }; };
+  wcv.addEventListener('pointerdown', e => {
+    try { wcv.setPointerCapture(e.pointerId); } catch { } ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (ptrs.size === 2) { const m = mid(); g = { kind: 'pinch', d0: m.d, z0: wild.cam.z, w0: wS2W(m.x, m.y) }; }
+    else if (ptrs.size === 1) g = { kind: 'pan', x: e.clientX, y: e.clientY, cx: wild.cam.x, cy: wild.cam.y, moved: 0 };
+  });
+  wcv.addEventListener('pointermove', e => {
+    if (!ptrs.has(e.pointerId)) return; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const C = wild.cam;
+    if (g?.kind === 'pinch' && ptrs.size >= 2) {
+      const m = mid(); C.z = clamp(g.z0 * m.d / g.d0, wZmin(), wZmax);
+      C.x = g.w0.x - (m.x - innerWidth / 2) / C.z; C.y = g.w0.y - (m.y - innerHeight / 2) / C.z; wClamp();
+    } else if (g?.kind === 'pan') {
+      const dx = e.clientX - g.x, dy = e.clientY - g.y; g.moved = Math.max(g.moved, Math.hypot(dx, dy));
+      C.x = g.cx - dx / C.z; C.y = g.cy - dy / C.z; wClamp();
+    }
+  });
+  const ptrUp = e => {
+    if (!ptrs.delete(e.pointerId)) return;
+    if (g?.kind === 'pan' && g.moved < 10 && !ptrs.size) {
+      const p = wS2W(e.clientX, e.clientY);
+      wild.pick = wild.walkers.filter(t => !(t.flee > 0) && !t.held && dist(p, t) < t.S * 1.6 + 14 / wild.cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0] || null;
+      renderWildPanel();
+    }
+    g = ptrs.size ? { kind: 'done' } : null; // the finger left after a pinch doesn't pan or tap
+  };
+  wcv.addEventListener("pointerup", ptrUp); wcv.addEventListener("pointercancel", ptrUp);
+  wcv.addEventListener('wheel', e => {
+    e.preventDefault(); const C = wild.cam, w0 = wS2W(e.clientX, e.clientY);
+    C.z = clamp(C.z * Math.exp(-e.deltaY * 0.0015), wZmin(), wZmax);
+    C.x = w0.x - (e.clientX - innerWidth / 2) / C.z; C.y = w0.y - (e.clientY - innerHeight / 2) / C.z; wClamp();
+  }, { passive: false });
+}
+if (window.turtle) window.turtle.wild = wild; // debug
