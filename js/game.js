@@ -1603,7 +1603,7 @@ function updateCrabs(dt) {
     c.legT += dt; c.moving = false;
     if (c.scoop > 0) {
       c.scoop -= dt;
-      if (c.scoop <= 0) { if (poops.includes(c.tgt)) { poops = poops.filter(q => q !== c.tgt); emit(c.tgt.x, c.tgt.y, 'sparkle', 5); } c.tgt = null; }
+      if (c.scoop <= 0) { if (poops.includes(c.tgt)) { poops = poops.filter(q => q !== c.tgt); emit(c.tgt.x, c.tgt.y, 'sparkle', 5); earn(1,c.tgt.x, c.tgt.y); } c.tgt = null; }
       continue;
     }
     if (c.tgt && !c.tgt.wander && !poops.includes(c.tgt)) c.tgt = null;
