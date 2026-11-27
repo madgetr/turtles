@@ -85,7 +85,7 @@ export function start(api) {
 
   panel.innerHTML = `<h1>🐢 Turtle lab</h1><div class="sub">Debug builder · uses the real renderer · your yard isn't touched</div>
     <div class="sum" id="lab-sum"></div>
-    <div class="btns"><button id="lab-rand">🎲 Random</button><button class="alt" id="lab-reset">Reset</button><button class="alt" id="lab-feet">Reset feet</button></div>`;
+    <div class="btns"><button id="lab-rand">🎲 Random</button><button class="alt" id="lab-reset">Reset</button><button class="alt" id="lab-feet">Reset feet</button><button id="lab-wild">🌲 Add to wild</button></div>`;
   const inputs = {};
   for (const [title, open, ctrls] of sections) {
     const d = document.createElement('details'); d.open = open;
@@ -163,6 +163,10 @@ export function start(api) {
   const defaults = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el._c.val]));
   document.getElementById('lab-reset').onclick = () => { for (const k in defaults) set(k, defaults[k]); t.x = t.y = 0; apply(); resetFeet(); };
   document.getElementById('lab-feet').onclick = () => resetFeet();
+  document.getElementById('lab-wild').onclick = e => { // a copy goes into your game's wild pool (an open game tab picks it up too)
+    const ok = api.addToWild(t);
+    e.target.textContent = ok ? `Added ${t.name} ✓` : 'No saved game'; setTimeout(() => e.target.textContent = '🌲 Add to wild', 1500);
+  };
   document.getElementById('lab-rand').onclick = () => {
     const nt = makeTurtle({ morph: api.rollMorph(), growth: Math.random() });
     set('name', nt.name); set('growth', nt.growth.toFixed(3));

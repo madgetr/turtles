@@ -404,7 +404,7 @@ const SAVE3 = 'turtle-save-v3', SAVE = 'turtle-save-v2', OLD_SAVE = 'turtle-save
 const KEEP = ['name', 'tint', 'traits', 'st', 'x', 'y', 'a', 'gut', 'growth', 'mud', 'chub', 'diet', 'born', 'arrived', 'morph'];
 let yards = [null], yardIdx = 0, yardName = 'My Yard';
 const packTurtle = t => Object.fromEntries(KEEP.map(k => [k, t[k]]));
-let wildPool = [], wildNets = [0, 0, 0]; // released + native wild turtles (shared across yards), nets owned per tier
+let wildPool = [], wildNets = [0, 0, 0], strayDone = -1; // released + native wild turtles (shared across yards), nets owned per tier
 const own = t => t.releasing === undefined && !t.guest; // your turtles (not fading away, not a friend's visiting turtle)
 function packYard() {
   return {
@@ -456,7 +456,7 @@ function save() {
   yards[yardIdx] = visit?.home || packYard(); // visiting a friend: your own yard waits in visit.home
   localStorage.setItem(SAVE3, JSON.stringify({
     v: 3, yards, active: yardIdx, base, t: Date.now(),
-    shared: { stars, lastDaily, loot, wildPool, wildNets, ...Object.fromEntries(SHARED_UP.map(k => [k, up[k]])) },
+    shared: { stars, lastDaily, loot, wildPool, wildNets, strayDone, ...Object.fromEntries(SHARED_UP.map(k => [k, up[k]])) },
   }));
 }
 // Loads the save. Returns { away (seconds), fresh, legacy (old screen coordinates), newStars }.
@@ -467,7 +467,7 @@ function load() {
     const sh = d3.shared || {};
     base = d3.base || null; stars = sh.stars ?? 30; lastDaily = sh.lastDaily || '';
     loot = { ...loot, ...(sh.loot || {}) };
-    wildPool = sh.wildPool || []; wildNets = sh.wildNets || [0, 0, 0];
+    wildPool = sh.wildPool || []; wildNets = sh.wildNets || [0, 0, 0]; strayDone = sh.strayDone ?? -1;
     for (const k of SHARED_UP) if (sh[k] !== undefined) up[k] = sh[k];
     yards = d3.yards; yardIdx = clamp(d3.active | 0, 0, yards.length - 1);
     const y = yards[yardIdx];
@@ -4416,6 +4416,13 @@ function frameBody(now) {
 if (LAB) import('./lab.js').then(m => m.start({
   cv, ctx, makeTurtle, use, resetFeet, updateFeet, drawTurtle, sizeFor, stageOf, morphInfo, personality, randomName, randomTint, rollMorph, randomTraits,
   MORPHS, TRAITS, KEEP, get T() { return T; },
+  addToWild: t => { // the lab never saves, so write straight into the stored game
+    let d = null; try { d = JSON.parse(localStorage.getItem(SAVE3)); } catch { }
+    if (!d?.yards) return false;
+    const now = Date.now(); d.shared ??= {};
+    (d.shared.wildPool ??= []).push({ ...packTurtle(t), st: undefined, gut: [], id: wildId(), origin: 'released', releasedAt: now, lastSeenAt: now, sightings: 0 });
+    localStorage.setItem(SAVE3, JSON.stringify(d)); return true;
+  },
 }));
 else {
   resize(); // measures the HUD
@@ -4457,7 +4464,7 @@ const FERAL_DAYS = 60, WILD_CAP = 40, WILD_NATIVES = 4, HIDE_HOURS = 8; // a tur
 const NETS = [ // tier 1..3: odds on a freshly released turtle (hi) and a fully feral one (lo)
   null, { name: 'Basic net', cost: 120, hi: 0.9, lo: 0.12 }, { name: 'Sturdy net', cost: 300, hi: 0.95, lo: 0.3 }, { name: 'Master net', cost: 750, hi: 0.99, lo: 0.55 },
 ];
-const wildnessOf = w => (w.origin === 'native' ? 1 : clamp((Date.now() - (w.releasedAt || 0)) / (FERAL_DAYS * 864e5), 0, 1));
+const wildnessOf = w => (w.origin === 'native' ? 1 : w.origin === 'stray' ? 0.5 : clamp((Date.now() - (w.releasedAt || 0)) / (FERAL_DAYS * 864e5), 0, 1));
 function catchOddsFor(w, netTier) {
   const n = NETS[netTier]; if (!n) return 0;
   const x = wildnessOf(w);
@@ -4484,14 +4491,14 @@ function seedNatives() {
 const yardRoom = () => Math.min(MAX_TURTLES, YARDS[up.yard].fits) - turtles.filter(own).length;
 // Returns { ok, turtle } on a catch, { ok: false, escaped: true } on a miss, or { ok: false, why } if it couldn't try.
 function catchWildTurtle(id, netTier) {
-  const w = wildPool.find(o => o.id === id);
+  const w = wildPool.find(o => o.id === id) || (wild.stray?.id === id ? wild.stray : null);
   if (!w) return { ok: false, why: 'gone' };
   if (!(wildNets[netTier - 1] > 0)) return { ok: false, why: 'No nets of that kind' };
   if (yardRoom() <= 0) return { ok: false, why: 'No room in this yard' };
   w.lastSeenAt = Date.now();
-  if (Math.random() >= catchOddsFor(w, netTier)) { w.hideUntil = Date.now() + HIDE_HOURS * 36e5; save(); return { ok: false, escaped: true }; } // a miss keeps the net
+  if (Math.random() >= catchOddsFor(w, netTier)) { w.hideUntil = Date.now() + HIDE_HOURS * 36e5; if (w === wild.stray) { strayDone = w.win; wild.stray = null; } save(); return { ok: false, escaped: true }; } // a miss keeps the net
   wildNets[netTier - 1]--; // the net goes home with the turtle
-  wildPool.splice(wildPool.indexOf(w), 1);
+  if (w === wild.stray) { strayDone = w.win; wild.stray = null; } else wildPool.splice(wildPool.indexOf(w), 1);
   const { id: _i, origin, releasedAt, lastSeenAt, sightings, ...rest } = w;
   const t = makeTurtle({ ...rest, gut: [], x: clamp(cam.x + rand(-60, 60), 60, YW - 60), y: clamp(cam.y + rand(-60, 60), 60, YH - 60), a: rand(-3, 3),
     tint: rest.tint || pickTint(turtles), arrived: Date.now() });
@@ -4548,12 +4555,29 @@ function wClamp() {
   C.x = clamp(C.x, hw, WW - hw); C.y = clamp(C.y, hh, WH - hh);
 }
 const wS2W = (sx, sy) => ({ x: wild.cam.x + (sx - innerWidth / 2) / wild.cam.z, y: wild.cam.y + (sy - innerHeight / 2) / wild.cam.z });
+// A rare stray passes through: each 3-hour window has a small chance of one. It's the same turtle all window
+// (so peeking twice doesn't reroll it), never joins the pool, and is gone once caught, escaped, or the window ends.
+const STRAY_HOURS = 3, STRAY_CHANCE = 0.18;
+function strayNow() {
+  const win = Math.floor(Date.now() / (STRAY_HOURS * 36e5));
+  if (win === strayDone) return null;
+  if (wild.stray?.win === win) return wild.stray;
+  const R = seeded((Math.sin(win * 12.9898) * 43758.5453) % 1 * 0.5 + 0.5); R(); R(); // warm up: neighbouring windows start close together
+  if (R() >= STRAY_CHANCE) return null;
+  const real = Math.random; Math.random = R; // a deterministic turtle for this window
+  try {
+    let morph = rollMorph([]);
+    for (let i = 0; i < 3 && morph.color === 'normal'; i++) morph = rollMorph([]); // strays tend to be the unusual ones
+    const t = makeTurtle({ growth: 0.15 + R() * 0.7, morph });
+    return (wild.stray = { ...packTurtle(t), id: 'stray' + win, win, origin: 'stray', releasedAt: Date.now(), sightings: 0 });
+  } finally { Math.random = real; }
+}
 function openWild() {
   if (visit || LAB) return;
   seedNatives();
   wild.cam = { x: WW / 2, y: WH / 2, z: 1 };
-  const pool = wildPool.filter(w => !(w.hideUntil > Date.now())).sort(() => Math.random() - 0.5), n = Math.min(pool.length, 1 + (Math.random() < 0.6) + (Math.random() < 0.25));
-  wild.walkers = pool.slice(0, n).map(w => {
+  const stray = strayNow(), pool = wildPool.filter(w => !(w.hideUntil > Date.now())).sort(() => Math.random() - 0.5), n = Math.min(pool.length, 1 + (Math.random() < 0.6) + (Math.random() < 0.25));
+  wild.walkers = [...pool.slice(0, n), ...(stray ? [stray] : [])].map(w => {
     let p = grassSpot();
     for (let i = 0; i < 20 && dist(p, wild.cam) < 600; i++) p = grassSpot(); // few and far between: not right where you start
     const { id, origin, releasedAt, lastSeenAt, sightings, ...rest } = w;
@@ -4567,7 +4591,7 @@ function openWild() {
   wild.pick = null; wild.throwing = null; renderWildPanel();
   wildEl.hidden = false; wild.open = true; wildResize();
   wild.last = performance.now(); wild.raf = requestAnimationFrame(wildFrame);
-  say(wild.walkers.length ? '🌲 Something is moving out there… drag to explore · pinch to zoom' : '🌲 It\'s quiet today', 3000);
+  if (stray) say('✨ A stray turtle is passing through the wild today… find it before it moves on', 3500); else say(wild.walkers.length ? '🌲 Something is moving out there… drag to explore · pinch to zoom' : '🌲 It\'s quiet today', 3000);
 }
 function closeWild() { wild.open = false; wildEl.hidden = true; cancelAnimationFrame(wild.raf); }
 function wildResize() { const d = Math.min(devicePixelRatio || 1, 2); wcv.width = innerWidth * d; wcv.height = innerHeight * d; wild.d = d; wClamp(); }
@@ -4653,7 +4677,7 @@ function renderWildPanel() {
   document.getElementById('wild-nets').innerHTML = wildNets.map((n, i) => `${netSvg(i + 1)} ${n}`).join(' &nbsp;');
   p.hidden = !t; if (!t) return;
   const w = t.wild, x = wildnessOf(w), mood = x <= 0.12 ? 'Still tame' : x < 0.5 ? 'Getting wild' : x < 1 ? 'Wild' : 'Feral';
-  const who = w.origin === 'native' ? 'A wild native turtle' : `Released ${agoText(Date.now() - w.releasedAt)} ago`;
+  const who = w.origin === 'stray' ? '✨ A stray, just passing through' : w.origin === 'native' ? 'A wild native turtle' : `Released ${agoText(Date.now() - w.releasedAt)} ago`;
   p.innerHTML = `<b>${w.name}</b><small>${who} · ${mood}</small><div class="nets">${[1, 2, 3].map(k =>
     `<button data-k="${k}" ${wildNets[k - 1] ? '' : 'disabled'}>${netSvg(k)} ${NETS[k].name} ×${wildNets[k - 1]}<br>${Math.round(catchOddsFor(w, k) * 100)}%</button>`).join('')}</div>`;
 }
@@ -4721,3 +4745,8 @@ function petWild(t) { // a small ⭐ for a gentle pat: a few per turtle per visi
   }, { passive: false });
 }
 if (window.turtle) window.turtle.wild = wild; // debug
+addEventListener('storage', e => { // the lab (another tab) added a turtle to the wild: pick it up before our next save overwrites it
+  if (LAB || e.key !== SAVE3) return;
+  let p = null; try { p = JSON.parse(e.newValue)?.shared?.wildPool; } catch { }
+  for (const w of p || []) if (!wildPool.some(o => o.id === w.id)) wildPool.push(w);
+});
