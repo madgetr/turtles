@@ -4460,7 +4460,7 @@ else {
 }
 
 // ---------- the wild: released turtles (plus a few natives) roam a big meadow; catch them back with nets ----------
-const FERAL_DAYS = 60, WILD_CAP = 40, WILD_NATIVES = 4, HIDE_HOURS = 8; // a turtle that slips the net won't show up again for a while
+const FERAL_DAYS = 60, WILD_CAP = 40, WILD_NATIVES = 4 /* minimum pool size */, HIDE_HOURS = 8; // a turtle that slips the net won't show up again for a while
 const NETS = [ // tier 1..3: odds on a freshly released turtle (hi) and a fully feral one (lo)
   null, { name: 'Basic net', cost: 120, hi: 0.9, lo: 0.12 }, { name: 'Sturdy net', cost: 300, hi: 0.95, lo: 0.3 }, { name: 'Master net', cost: 750, hi: 0.99, lo: 0.55 },
 ];
@@ -4482,7 +4482,7 @@ function releaseToWild(t) {
   pruneWild(); save();
 }
 function seedNatives() {
-  while (wildPool.filter(w => w.origin === 'native').length < WILD_NATIVES) {
+  while (wildPool.length < WILD_NATIVES) { // keep the wild from running empty
     const t = makeTurtle({ growth: rand(0.25, 1), morph: rollMorph([]) });
     wildPool.push({ ...packTurtle(t), id: wildId(), origin: 'native', releasedAt: Date.now() - rand(0, 30) * 864e5, lastSeenAt: 0, sightings: 0 });
   }
@@ -4498,7 +4498,7 @@ function catchWildTurtle(id, netTier) {
   w.lastSeenAt = Date.now();
   if (Math.random() >= catchOddsFor(w, netTier)) { w.hideUntil = Date.now() + HIDE_HOURS * 36e5; if (w === wild.stray) { strayDone = w.win; wild.stray = null; } save(); return { ok: false, escaped: true }; } // a miss keeps the net
   wildNets[netTier - 1]--; // the net goes home with the turtle
-  if (w === wild.stray) { strayDone = w.win; wild.stray = null; } else wildPool.splice(wildPool.indexOf(w), 1);
+  if (w === wild.stray) { strayDone = w.win; wild.stray = null; } else { wildPool.splice(wildPool.indexOf(w), 1); seedNatives(); } // a fresh native fills the gap if the pool runs low
   const { id: _i, origin, releasedAt, lastSeenAt, sightings, ...rest } = w;
   const t = makeTurtle({ ...rest, gut: [], x: clamp(cam.x + rand(-60, 60), 60, YW - 60), y: clamp(cam.y + rand(-60, 60), 60, YH - 60), a: rand(-3, 3),
     tint: rest.tint || pickTint(turtles), arrived: Date.now() });
