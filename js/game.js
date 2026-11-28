@@ -3522,7 +3522,7 @@ const nameOf = o => o === bowl ? BOWLS[up.bowl].name : o.kind === 'feeder' ? FEE
   : o.kind === 'deco' ? DECOS[o.type].name : (AUTO[o.kind] || STRUCTS[o.kind] || ROCKS[o.kind] || WILD[o.kind]).name;
 const HIT = { pond: 100, log: 75, hut: HUT.r, garden: 55, mud: 60, slide: 75, mirror: 32, lamp: 30, feeder: 30, deco: 24, mossbed: 70, fog: 30, cave: 120, birdfeeder: 28, bughotel: 28 };
 const hitR = o => (o === bowl ? bowl.r : ROCKS[o.kind] ? rockDims(o).rx * 0.85 : o.kind === 'garden' ? gardenCols() * SLOT / 2 + 10 : (HIT[o.kind] || 30) * sizeK(o.kind));
-const movables = () => [bowl, ...objs];
+const movables = () => [bowl, ...objs, ...(up.farm?.hives || [])]; // beehives can be dragged too
 const doneBtn = document.getElementById('arrange-done');
 function startArrange() {
   arranging = true; placing = null; shop.hidden = true; doneBtn.hidden = false;
