@@ -513,77 +513,169 @@ function healthStep(t, dt, r) {
   if (d === 0 && s.hunger > 40 && s.thirst > 40 && poops.length < 3) d = r.heal;
   s.health = clamp(s.health + d * dt, 0, 100);
 }
+function daytimeFactor(ms) {
+  const d = new Date(ms);
+  const hour = d.getHours() + d.getMinutes() / 60;
+  // Smooth curve: ~0.6 at midnight, ~1.45 at 13:00
+  const sun = Math.sin(((hour - 6) / 24) * Math.PI * 2);
+  return clamp(1.02 + sun * 0.42, 0.58, 1.46);
+}
+
+// Player check-ins: tap the jammed feeder, weedy garden or mucky fountain to fix it
+function tendAt(p) {
+  const f = objOf('feeder'), g = objOf('garden'), near = (o, r) => o && dist(p, o) < r / cam.z + (o.r || 40);
+  let msg = null;
+  if (up.jam && near(f, 30)) { up.jam = false; msg = 'Feeder unjammed!'; emit(f.x, f.y, 'sparkle', 8); }
+  else if ((up.weeds || 0) > 0.15 && near(g, 60)) { up.weeds = 0; msg = 'Garden weeded!'; emit(g.x, g.y, 'sparkle', 10); }
+  else if ((up.algae || 0) > 0.15 && BOWLS[up.bowl].refill && dist(p, bowl) < bowl.r + 20 / cam.z) { up.algae = 0; msg = 'Fountain scrubbed!'; emit(bowl.x, bowl.y, 'drop', 10); }
+  if (!msg) return false;
+  buzz(15); snd.play('click'); if (typeof toast === 'function') toast(msg); save();
+  return true;
+}
+
 function simulateAway(secs) {
   const n = Math.ceil(secs / 60), dt = secs / n; // one-minute steps
-  const rep = turtles.map(t => ({ t, ate: 0, drank: 0, pooped: 0, stage0: stageOf(t.growth), starved: false, parched: false, lowHealth: 100 }));
+  const rep = turtles.map(t => ({
+    t, ate: 0, drank: 0, pooped: 0, stage0: stageOf(t.growth),
+    starved: false, parched: false, lowHealth: 100
+  }));
   let dryAt = null, fed = 0, feedAcc = 0;
-  const pond = objOf('pond'), feeder = up.feeder && objOf('feeder'), B = BOWLS[up.bowl], F = FEEDERS[up.feeder];
-  const enrich = Math.max(0.55, 1 - 0.05 * structCount()); // structures help, but won't replace a daily check-in
+  const pond = objOf('pond'), feeder = up.feeder && objOf('feeder');
+  const B = BOWLS[up.bowl], F = FEEDERS[up.feeder];
+  const enrich = Math.max(0.65, 1 - 0.03 * structCount()); // weaker passive buffer while away
   const lamp = objOf('lamp'), t0ms = Date.now() - secs * 1000;
   let crabAcc = 0, cleaned = 0, grown = 0;
+  const jam0 = !!up.jam;
+  up.weeds = up.weeds || 0; up.algae = up.algae || 0;
+  const hrs = secs / 3600, crabCap = Math.round(up.crab * (3 + Math.min(3, hrs / 4))); // small per-trip cap
+
   for (let i = 0; i < n; i++) {
     const simNow = t0ms + (i + 1) * dt * 1000;
-    grown += gardenTick(simNow);
-    if (B.refill) bowl.level = Math.min(1, bowl.level + dt * B.refill / 7200); // fountain: full again every ~2 h (grand: 1 h)
-    if (feeder) {
-      feedAcc += dt;
-      if (feedAcc >= F.awayEvery) {
-        feedAcc -= F.awayEvery;
-        if (foods.length < 6 && turtles.some(t => t.st.hunger < 75)) { foods.push(feederFood(feeder, F)); fed++; }
-      }
+    const day = daytimeFactor(simNow);
+    const activeDay = day >= 1.0;
+    const elapsedH = (i + 1) * dt / 3600;
+
+    // Garden gets weedy while unattended; weeds slow crops until you tend it
+    if (up.garden) {
+      up.weeds = Math.min(1, up.weeds + dt / (activeDay ? 5 : 8) / 3600); // fully overgrown in ~6h
+      if (Math.random() < (activeDay ? 0.55 : 0.7) * (1 - 0.85 * up.weeds)) grown += gardenTick(simNow);
     }
-    for (const r of rep) {
-      const t = r.t, s = t.st;
-      if (t.arrived && simNow < t.arrived) continue; // moved here later: this part of the gap wasn't theirs
-      s.hunger = clamp(s.hunger - dt * AWAY.hunger * lerp(0.85, 1.2, t.traits.appetite) * (lamp ? 0.95 : 1), 0, 100);
-      s.thirst = clamp(s.thirst - dt * AWAY.thirst, 0, 100);
-      if (s.thirst < 55 && (pond || waterTiles.length)) { s.thirst = 100; r.drank++; r.pond = true; } // all-you-can-drink pond
-      else if (s.thirst < 55 && bowl.level > 0.01) { // wander over for a drink
-        const sip = Math.min(bowl.level, 0.22 / B.cap);
-        bowl.level -= sip; s.thirst = clamp(s.thirst + sip * B.cap * 260, 0, 100); r.drank++;
-        if (bowl.level <= 0.01 && dryAt === null && !B.refill) dryAt = i * dt;
-      }
-      if (s.hunger < 70 && foods.length) { // munch leftovers
-        const f = foods.shift();
-        if (f.slot !== undefined && plots[f.slot]) plots[f.slot].t0 = simNow; // garden replants itself
-        s.hunger = clamp(s.hunger + f.bites * 10, 0, 100); r.ate++;
-        t.diet.push(f.type); if (t.diet.length > 6) t.diet.shift();
-        if (f.type === 'berry') t.chub = clamp(t.chub + 0.05, 0, 1);
-        t.growth = clamp(t.growth + f.bites * GROW_PER_BITE * GROW_RATE * 0.75, 0, 1);
-        t.gut.push(rand(15, 28) * 40); // digests over ~10-20 min while away
-      }
-      for (let g = t.gut.length - 1; g >= 0; g--) {
-        t.gut[g] -= dt;
-        if (t.gut[g] <= 0) {
-          t.gut.splice(g, 1); r.pooped++;
-          if (poops.length < 14) poops.push({ x: rand(40, YW - 40), y: rand(40, YH - 40), s: rand(0.85, 1.15), born: 1 });
+
+    // Fountain builds up algae: slower refill, and drinks hydrate less
+    if (B.refill) {
+      up.algae = Math.min(1, up.algae + dt / (activeDay ? 8 : 12) / 3600); // fully mucky in ~10h
+      bowl.level = Math.min(1, bowl.level + dt * B.refill * (1 - 0.75 * up.algae) / (activeDay ? 12000 : 9000));
+    }
+
+    // Autofeeder can jam (more likely by day and the longer you're gone); stays jammed until tapped
+    if (feeder && !up.jam && Math.random() < dt / 3600 * (activeDay ? 0.08 : 0.03) * (1 + elapsedH / 6)) up.jam = true;
+
+    // Autofeeder is less reliable/generous while you're gone
+    if (feeder && !up.jam) {
+      feedAcc += dt;
+      const awayInterval = F.awayEvery * (activeDay ? 1.75 : 1.45);
+      if (feedAcc >= awayInterval) {
+        feedAcc -= awayInterval;
+        if (foods.length < 3 && turtles.some(t => t.st.hunger < 55)) {
+          foods.push(feederFood(feeder, F));
+          fed++;
         }
       }
-      let drain = (AWAY.happy + poops.length * AWAY.dirty) * enrich;
-      if (s.hunger < 25 || s.thirst < 25) drain += AWAY.happy * 2.5;
+    }
+
+    for (const r of rep) {
+      const t = r.t, s = t.st;
+      if (t.arrived && simNow < t.arrived) continue;
+
+      const hungerRate = AWAY.hunger * lerp(0.9, 1.25, t.traits.appetite) * day * (lamp ? 0.98 : 1);
+      const thirstRate = AWAY.thirst * day * (activeDay ? 1.2 : 0.85);
+
+      s.hunger = clamp(s.hunger - dt * hungerRate, 0, 100);
+      s.thirst = clamp(s.thirst - dt * thirstRate, 0, 100);
+
+      if (s.thirst < 55 && (pond || waterTiles.length)) {
+        // Pond helps, but doesn't fully offset heavy daytime thirst
+        s.thirst = clamp(s.thirst + (activeDay ? 35 : 55), 0, 90);
+        r.drank++;
+        r.pond = true;
+      } else if (s.thirst < 55 && bowl.level > 0.01) {
+        const sip = Math.min(bowl.level, (0.25 * day) / B.cap);
+        bowl.level -= sip;
+        s.thirst = clamp(s.thirst + sip * B.cap * 230 * (1 - 0.5 * (B.refill ? up.algae : 0)), 0, 100);
+        r.drank++;
+        if (bowl.level <= 0.01 && dryAt === null && !B.refill) dryAt = i * dt;
+      }
+
+      if (s.hunger < 65 && foods.length) {
+        const f = foods.shift();
+        if (f.slot !== undefined && plots[f.slot]) plots[f.slot].t0 = simNow + 1800 * 1000; // slower regrowth when unattended
+        s.hunger = clamp(s.hunger + f.bites * 9, 0, 100);
+        r.ate++;
+        t.diet.push(f.type);
+        if (t.diet.length > 6) t.diet.shift();
+        if (f.type === 'berry') t.chub = clamp(t.chub + 0.05, 0, 1);
+        t.growth = clamp(t.growth + f.bites * GROW_PER_BITE * GROW_RATE * 0.55, 0, 1);
+        t.gut.push(rand(14, 24) * 40 / day); // digests faster during active daytime
+      }
+
+      for (let g = t.gut.length - 1; g >= 0; g--) {
+        t.gut[g] -= dt * (activeDay ? 1.25 : 0.8);
+        if (t.gut[g] <= 0) {
+          t.gut.splice(g, 1);
+          r.pooped++;
+          if (poops.length < 18) {
+            poops.push({ x: rand(40, YW - 40), y: rand(40, YH - 40), s: rand(0.85, 1.15), born: 1 });
+          }
+        }
+      }
+
+      let drain = (AWAY.happy * day + poops.length * AWAY.dirty * (activeDay ? 1.35 : 1)) * enrich;
+      if (s.hunger < 30 || s.thirst < 30) drain += AWAY.happy * 3.0;
       s.happy = clamp(s.happy - dt * drain, 0, 100);
-      // moods: friends keep each other company, everyone sleeps, a turtle alone gets lonely
-      s.social = clamp(s.social + dt * AWAY.happy * (turtles.length > 1 ? 2.5 : -lerp(0.75, 2.2, t.traits.friendly)), 10, 100);
-      s.energy = clamp(s.energy + dt * 0.01, 0, 100);
-      t.chub = clamp(t.chub - dt * 0.000018, 0, 1); // slims down slowly: a berry binge still shows the next morning
+
+      s.social = clamp(
+        s.social + dt * AWAY.happy * (turtles.length > 1 ? 1.6 : -lerp(0.9, 2.4, t.traits.friendly)) * day,
+        10,
+        100
+      );
+      s.energy = clamp(s.energy - dt * (activeDay ? 0.025 : -0.01), 0, 100);
+      t.chub = clamp(t.chub - dt * 0.000018, 0, 1);
+
       healthStep(t, dt, AWAY);
-      s.health = Math.max(s.health, AWAY_FLOOR); // never dies while you're away: at worst comes back sick
-      if (s.health > 50 && s.hunger > 40 && s.thirst > 40) t.growth = clamp(t.growth + dt * GROW_PER_SEC * GROW_RATE * (lamp ? 1.15 : 1), 0, 1);
+      s.health = Math.max(s.health, AWAY_FLOOR);
+
+      if (s.health > 65 && s.hunger > 50 && s.thirst > 50) {
+        t.growth = clamp(t.growth + dt * GROW_PER_SEC * GROW_RATE * 0.55 * (lamp ? 1.08 : 1), 0, 1);
+      }
+
       if (s.hunger <= 0) r.starved = true;
       if (s.thirst <= 0) r.parched = true;
       r.lowHealth = Math.min(r.lowHealth, s.health);
     }
-    if (up.crab) { // crabs tidy up, enough for a school day without keeping up forever
-      crabAcc += dt;
-      const every = 900 / up.crab;
-      while (crabAcc >= every) { crabAcc -= every; if (poops.length) { poops.pop(); cleaned++; } }
+
+    // Crabs slow down over long absences and hit a per-trip cleanup cap
+    if (up.crab) {
+      const maxClean = crabCap;
+      if (cleaned < maxClean) {
+        crabAcc += dt;
+        const fatigue = (1 + cleaned * 0.25) ** 1.5 * (1 + elapsedH / 8); // tire fast, and more the longer you're gone
+        const every = (2400 / up.crab) * fatigue;
+        while (crabAcc >= every && cleaned < maxClean) {
+          crabAcc -= every;
+          if (poops.length) {
+            poops.pop();
+            cleaned++;
+          }
+        }
+      }
     }
   }
-  turtles.forEach(t => t.mud = Math.max(0, (t.mud || 0) - secs / 900));
-  const chilly = darkness() > 0.5 && !lamp && !['hut', 'cave', 'heatrock', 'mossbed'].some(objOf); // a cold night with nowhere warm
+
+  turtles.forEach(t => t.mud = Math.max(0, (t.mud || 0) - secs / 1200));
+  const chilly = darkness() > 0.5 && !lamp && !['hut', 'cave', 'heatrock', 'mossbed'].some(objOf);
   turtles.forEach(t => t.st.warm = chilly ? Math.min(t.st.warm, 35) : 100);
   turtles.forEach(t => t.S = sizeFor(t.growth));
-  return { secs, rep, dryAt, fed, cleaned, grown };
+  return { secs, rep, dryAt, fed, cleaned, grown, jammed: !jam0 && up.jam, stillJammed: jam0 && up.jam, weeds: up.weeds, algae: B.refill ? up.algae : 0 };
 }
 
 const fmtTime = s => { const m = Math.round(s / 60); return m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d ${Math.floor(m % 1440 / 60)} h`; }; // round once, so never "1 h 60 min"
@@ -611,6 +703,9 @@ function showAway(report, where) {
   if (report.grown) extra.push(`🥬 The garden grew ${report.grown} veggie${report.grown > 1 ? 's' : ''}.`);
   if (report.cleaned) extra.push(`🦀 The crab${up.crab > 1 ? 's' : ''} cleaned up ${report.cleaned} mess${report.cleaned > 1 ? 'es' : ''}.`);
   if (report.fed) extra.push(`🥫 The feeder dropped ${report.fed} snack${report.fed > 1 ? 's' : ''}.`);
+  if (report.jammed || report.stillJammed) extra.push(`⚠️ The feeder ${report.jammed ? 'jammed while you were out' : 'is still jammed'}. Tap it to fix.`);
+  if (report.weeds > 0.3) extra.push(`🌿 The garden is ${report.weeds > 0.7 ? 'overgrown' : 'getting weedy'}. Tap it to tend.`);
+  if (report.algae > 0.3) extra.push(`🟢 The fountain is ${report.algae > 0.7 ? 'clogged with algae' : 'getting mucky'}. Tap it or refill to clean.`);
   if (poops.length) extra.push(`🧹 ${poops.length} mess${poops.length > 1 ? 'es' : ''} to clean up.`);
   box.querySelector('.body').innerHTML = `<div class="when">${where ? `${esc(where)}: last visited ${fmtTime(report.secs)} ago` : `You were away ${fmtTime(report.secs)}`}</div>` + lines.join('<hr>') + (extra.length ? '<hr>' + extra.join('<br>') : '');
   box.hidden = false;
@@ -3137,7 +3232,7 @@ document.querySelectorAll('#tools button').forEach(b => b.addEventListener('clic
   snd.play('click');
   if (b.dataset.act === 'water') {
     if (bowl.level < 0.5 && waterStarCool <= 0) { earn(1, bowl.x, bowl.y - bowl.r - 10); waterStarCool = 60; }
-    bowl.level = 1; bowl.fill = 1; buzz(15); job('water'); snd.play('pour');
+    bowl.level = 1; bowl.fill = 1; up.algae = 0; buzz(15); job('water'); snd.play('pour');
     for (let i = 0; i < 14; i++) emit(bowl.x, bowl.y, 'drop');
     say('Fresh water!');
     return;
@@ -3216,6 +3311,7 @@ cv.addEventListener('pointerdown', e => {
     gest = { kind: 'ball' };
     return;
   }
+  if (!visit && !placing && tendAt(p)) return;
   gest = { kind: 'maybe', sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y }; // a tap, unless the finger moves (then it's a pan)
 });
 cv.addEventListener('pointermove', e => {
@@ -4324,9 +4420,9 @@ function frameBody(now) {
   if (!visit) separate();
   updateBall(dt);
   bowl.fill = Math.max(0, bowl.fill - dt);
-  if (BOWLS[up.bowl].refill) bowl.level = Math.min(1, bowl.level + dt * BOWLS[up.bowl].refill / 600); // fountain tops itself up
+  if (BOWLS[up.bowl].refill) bowl.level = Math.min(1, bowl.level + dt * BOWLS[up.bowl].refill * (1 - 0.7 * (up.algae || 0)) / 600); // fountain tops itself up (slower when algae-clogged)
   const feeder = up.feeder && objOf('feeder');
-  if (feeder && !visit) {
+  if (feeder && !visit && !up.jam) {
     const F = FEEDERS[up.feeder];
     if ((feederT += dt) > F.every) {
       feederT = 0;
