@@ -529,7 +529,7 @@ function tendAt(p) {
   else if ((up.weeds || 0) > 0.15 && near(g, 60)) { up.weeds = 0; msg = 'Garden weeded!'; emit(g.x, g.y, 'sparkle', 10); }
   else if ((up.algae || 0) > 0.15 && BOWLS[up.bowl].refill && dist(p, bowl) < bowl.r + 20 / cam.z) { up.algae = 0; msg = 'Fountain scrubbed!'; emit(bowl.x, bowl.y, 'drop', 10); }
   if (!msg) return false;
-  buzz(15); snd.play('click'); if (typeof toast === 'function') toast(msg); save();
+  buzz(15); snd.play('click'); say(msg); save();
   return true;
 }
 
