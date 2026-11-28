@@ -1809,29 +1809,35 @@ function drawGarden(o, now) {
   }
 }
 
-// ---------- farm: plow tiles, plant crops (turtles leave them alone), harvest for stars; beehives make honey ----------
-const CROPS = { wheat: { icon: '🌾', name: 'Wheat', h: 2, stars: 4 }, carrot: { icon: '🥕', name: 'Carrots', h: 3, stars: 6 }, pumpkin: { icon: '🎃', name: 'Pumpkins', h: 4, stars: 9 } };
-const PLOW_COST = 2, MAX_FIELDS = 24, HIVE_COST = 60, MAX_HIVES = 3, HONEY_MS = 90 * 60000, HONEY_MAX = 3, HONEY_STARS = 4;
+// ---------- farm: paint Plowed soil, plant seeds from the shop (turtles leave crops alone), harvest for stars; beehives make honey ----------
+const CROPS = {
+  wheat: { icon: '🌾', name: 'Wheat', h: 2, stars: 4, pack: 4, cost: 6 },
+  carrot: { icon: '🥕', name: 'Carrots', h: 3, stars: 6, pack: 4, cost: 10 },
+  pumpkin: { icon: '🎃', name: 'Pumpkins', h: 4, stars: 9, pack: 3, cost: 14 },
+};
+const HIVE_COST = 60, MAX_HIVES = 3, HONEY_MS = 90 * 60000, HONEY_MAX = 3, HONEY_STARS = 4;
 let seedK = 'wheat';
-const farm = () => (up.farm = up.farm || { fields: {}, hives: [] });
-const cropK = f => f.crop ? clamp((Date.now() - f.t0) / (CROPS[f.crop].h * 3600000), 0, 1) : 0;
+const farm = () => { const F = (up.farm = up.farm || {}); F.fields = F.fields || {}; F.hives = F.hives || []; F.seeds = F.seeds || {}; return F; };
+const cropK = f => clamp((Date.now() - f.t0) / (CROPS[f.crop].h * 3600000), 0, 1);
 const honeyOf = h => Math.min(HONEY_MAX, Math.floor((Date.now() - h.t0) / HONEY_MS));
-function farmTap(p) {
+function buySeeds(k) {
+  const F = farm(); F.seeds[k] = (F.seeds[k] || 0) + CROPS[k].pack; seedK = k;
+  setTimeout(() => say(`${CROPS[k].icon} Tap Plowed soil to plant · paint soil with the 🖌️ brush`, 3500), 400);
+}
+function farmTap(p) { // true if the tap was used
   const F = farm(), c = Math.floor(p.x / TILE), r = Math.floor(p.y / TILE), k = `${c},${r}`, f = F.fields[k];
-  if (!f) {
-    if (ground[k] === 'water') return say('Can\'t plow water');
-    if (Object.keys(F.fields).length >= MAX_FIELDS) return say(`That's a full farm (${MAX_FIELDS} plots)`);
-    if (stars < PLOW_COST) return say(`Plowing costs ⭐${PLOW_COST}`);
-    stars -= PLOW_COST; F.fields[k] = { crop: null, t0: 0 }; snd.play('scoop'); buzz(10);
-    emit((c + 0.5) * TILE, (r + 0.5) * TILE, 'sparkle', 4); say(`Plowed! Tap it to plant ${CROPS[seedK].icon}`);
-  } else if (!f.crop) {
-    f.crop = seedK; f.t0 = Date.now(); snd.play('drop'); buzz(8); say(`${CROPS[seedK].icon} planted · ready in ${CROPS[seedK].h}h`);
-  } else if (cropK(f) >= 1) {
-    const C = CROPS[f.crop]; f.crop = null; earn(C.stars, (c + 0.5) * TILE, r * TILE); emit((c + 0.5) * TILE, (r + 0.5) * TILE, 'sparkle', 8); say(`${C.icon} Harvested!`);
-  } else {
-    const m = Math.ceil((1 - cropK(f)) * CROPS[f.crop].h * 60); say(`${CROPS[f.crop].icon} ${m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`} to go`);
+  if (ground[k] !== 'soil') return false;
+  const cx = (c + 0.5) * TILE, cy = (r + 0.5) * TILE;
+  if (f && cropK(f) >= 1) {
+    const C = CROPS[f.crop]; delete F.fields[k]; earn(C.stars, cx, cy - 30); emit(cx, cy, 'sparkle', 8); say(`${C.icon} ${C.name} harvested!`); buzz(12);
+  } else if (f) return false;
+  else {
+    const kk = F.seeds[seedK] > 0 ? seedK : Object.keys(CROPS).find(x => F.seeds[x] > 0);
+    if (!kk) return false;
+    F.seeds[kk]--; F.fields[k] = { crop: kk, t0: Date.now() }; snd.play('drop'); buzz(8);
+    say(`${CROPS[kk].icon} planted · ready in ${CROPS[kk].h}h · ${F.seeds[kk]} seeds left`);
   }
-  save();
+  save(); return true;
 }
 function hiveTap(p) {
   const h = farm().hives.find(h => dist(h, p) < Math.max(28, 24 / cam.z));
@@ -1841,30 +1847,57 @@ function hiveTap(p) {
   h.t0 = Date.now(); earn(n * HONEY_STARS, h.x, h.y - 30); say(`🍯 ${n} jar${n > 1 ? 's' : ''} of honey!`); save();
   return true;
 }
+// Plants grow taller with time and change colour when ripe, plus a twinkle so ready ones stand out
+function drawCrop(c, x, y, f, time, sv) {
+  const k = cropK(f), ripe = k >= 1, sway = Math.sin(time * 1.6 + sv * 6) * (0.5 + k * 1.5);
+  const stem = (x0, h, col, w) => { c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(x0, y); c.quadraticCurveTo(x0, y - h * 0.6, x0 + sway, y - h); c.stroke(); };
+  const leaf = (lx, ly, a, l, col) => { c.fillStyle = col; c.beginPath(); c.ellipse(lx + Math.cos(a) * l / 2, ly + Math.sin(a) * l / 2, l / 2, l / 5, a, 0, 7); c.fill(); };
+  if (k < 0.12) { leaf(x - 1, y, -2.4, 6, '#7cc45a'); leaf(x + 1, y, -0.7, 6, '#7cc45a'); return; } // sprout
+  if (f.crop === 'wheat') {
+    const h = 6 + k * 26, col = ripe ? '#c99a2e' : k > 0.7 ? '#a7b24a' : '#6fae45';
+    for (const dx of [-7, -2.5, 2.5, 7]) {
+      const hh = h * (0.85 + ((dx + 8) * 7 % 5) / 20);
+      stem(x + dx, hh, col, 1.8);
+      if (k > 0.45) { c.fillStyle = ripe ? '#f0c64a' : '#b9c66a'; c.beginPath(); c.ellipse(x + dx + sway, y - hh - 4 * k, 2.2 * k + 0.6, 6 * k, 0, 0, 7); c.fill(); }
+    }
+  } else if (f.crop === 'carrot') {
+    const h = 5 + k * 18;
+    if (k > 0.6) { c.fillStyle = '#f08a24'; c.beginPath(); c.ellipse(x, y + 1, 3 + k * 2.5, 2 + k * 1.5, 0, 0, 7); c.fill(); }
+    for (const a of [-2.25, -1.9, -1.57, -1.25, -0.9]) leaf(x, y - 1, a + sway * 0.04, h, ripe ? '#3f9a35' : '#5fb547');
+  } else {
+    const n = k > 0.3 ? 4 : 2;
+    for (let i = 0; i < n; i++) leaf(x, y, i * 1.6 + sv * 3, 8 + k * 10, '#4e9a3a');
+    if (k > 0.4) {
+      const R = 3 + (k - 0.4) * 16;
+      c.fillStyle = ripe ? '#f07c1c' : k > 0.75 ? '#d9a23a' : '#8fbf4a';
+      for (const dx of [-0.5, 0.5, 0]) { c.beginPath(); c.ellipse(x + dx * R * 0.9, y + 2 - R * 0.6, R * 0.6, R * 0.75, 0, 0, 7); c.fill(); }
+      c.strokeStyle = '#5b3a1a'; c.lineWidth = 2; c.beginPath(); c.moveTo(x, y + 2 - R * 1.3); c.lineTo(x + 2, y - R * 1.6); c.stroke();
+    }
+  }
+  if (ripe) {
+    const a = time * 3 + sv * 9, tw = 0.5 + 0.5 * Math.sin(a);
+    c.fillStyle = `rgba(255,245,170,${0.5 + 0.5 * tw})`; c.beginPath(); c.arc(x + 10, y - 24 + Math.sin(a * 0.7) * 3, 1.5 + tw * 1.8, 0, 7); c.fill();
+  }
+}
 function drawFarm(v, time) {
   const F = up.farm; if (!F) return;
-  const c = ctx; c.textAlign = 'center'; c.textBaseline = 'middle';
-  for (const k in F.fields) {
-    const [cc, rr] = k.split(',').map(Number), x = cc * TILE, y = rr * TILE, f = F.fields[k];
-    if (!inView({ x: x + TILE / 2, y: y + TILE / 2 }, TILE, v)) continue;
-    c.fillStyle = '#6b4626'; c.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
-    c.strokeStyle = '#4f321a'; c.lineWidth = 2;
-    for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(x + 4, y + i * TILE / 4); c.lineTo(x + TILE - 4, y + i * TILE / 4); c.stroke(); }
-    if (!f.crop) continue;
-    const kk = cropK(f);
-    if (kk < 0.35) { c.fillStyle = '#7cc45a'; c.beginPath(); c.ellipse(x + TILE / 2 - 3, y + TILE / 2, 4, 2, -0.6, 0, 7); c.ellipse(x + TILE / 2 + 3, y + TILE / 2, 4, 2, 0.6, 0, 7); c.fill(); continue; }
-    const bob = kk >= 1 ? Math.sin(time * 4 + cc) * 1.5 : 0;
-    c.font = `${Math.round(12 + kk * 14)}px sans-serif`; c.globalAlpha = kk >= 1 ? 1 : 0.85;
-    c.fillText(CROPS[f.crop].icon, x + TILE / 2, y + TILE / 2 + bob); c.globalAlpha = 1;
-    if (kk >= 1) { c.font = '10px sans-serif'; c.fillText('✨', x + TILE - 7, y + 7); }
+  const c = ctx;
+  for (const k in F.fields || {}) {
+    if (ground[k] !== 'soil') { if (!visit) delete F.fields[k]; continue; } // painted over: the crop is gone
+    const [cc, rr] = k.split(',').map(Number), x = (cc + 0.5) * TILE, y = (rr + 0.5) * TILE + 10;
+    if (inView({ x, y }, TILE, v)) drawCrop(c, x, y, F.fields[k], time, tileRand(cc, rr)());
   }
-  for (const h of F.hives) {
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  for (const h of F.hives || []) {
     if (!inView(h, 40, v)) continue;
     c.fillStyle = '#0003'; c.beginPath(); c.ellipse(h.x, h.y + 14, 16, 5, 0, 0, 7); c.fill();
     c.fillStyle = '#e0a83a'; c.strokeStyle = '#9a6a1c'; c.lineWidth = 2;
     for (let i = 0; i < 4; i++) { const w = 26 - Math.abs(i - 1.2) * 5; c.beginPath(); c.roundRect(h.x - w / 2, h.y + 8 - i * 9, w, 9, 4); c.fill(); c.stroke(); }
     c.fillStyle = '#3a2410'; c.beginPath(); c.arc(h.x, h.y + 4, 3, 0, 7); c.fill();
-    for (let i = 0; i < 3; i++) { const a = time * 2 + i * 2.1; c.font = '9px sans-serif'; c.fillText('🐝', h.x + Math.cos(a) * 20, h.y - 14 + Math.sin(a * 1.3) * 8); }
+    for (let i = 0; i < 3; i++) {
+      const a = time * 2 + i * 2.1, bx = h.x + Math.cos(a) * 20, by = h.y - 14 + Math.sin(a * 1.3) * 8;
+      c.fillStyle = '#f2c230'; c.beginPath(); c.ellipse(bx, by, 3, 2, 0, 0, 7); c.fill(); c.fillStyle = '#222'; c.fillRect(bx - 0.5, by - 2, 1, 4);
+    }
     const n = honeyOf(h); if (n) { c.font = '14px sans-serif'; c.fillText('🍯'.repeat(n), h.x, h.y - 32); }
   }
 }
@@ -2526,6 +2559,7 @@ const GROUND = {
   sand: { name: 'Sand (erase)', col: '#d9c494', cost: 0 },
   grass: { name: 'Grass', col: '#7fb04f', cost: 50, dots: ['#6a9a40', '#93c25e'] },
   dirt: { name: 'Dirt', col: '#9b7650', cost: 40, dots: ['#86643f', '#ad8a62'] },
+  soil: { name: 'Plowed soil', col: '#6e4a2a', cost: 30, pave: 'furrow' },
   gravel: { name: 'Gravel', col: '#b9b2a6', cost: 60, dots: ['#8f887c', '#d6d0c4', '#a39b8e'] },
   moss: { name: 'Moss', col: '#5c8c3c', cost: 100, dots: ['#4c7a30', '#6fa24a'] },
   stone: { name: 'Stone path', col: '#c9c2b5', cost: 150, pave: 'stone' },
@@ -2543,10 +2577,10 @@ const tileRand = (c, r) => seeded(((c * 73856093) ^ (r * 19349663)) % 1000003 / 
 // neighbour matches) and whose INSIDE corners get a curved fillet, so neighbouring tiles of one type join into
 // a single flowing shape instead of a row of bumps.
 const SHADE = { // rim (drawn under the fill so only the outer edge shows) and deep-water colours
-  grass: '#5f8f3a', moss: '#466f2c', meadow: '#679a3e', dirt: '#7d5c3c', gravel: '#989083',
+  grass: '#5f8f3a', moss: '#466f2c', meadow: '#679a3e', dirt: '#7d5c3c', soil: '#4f321a', gravel: '#989083',
   stone: '#a39b8e', brick: '#8e4a34', wood: '#7a5530', water: '#c2a874',
 };
-const LAYERS = ['bank', 'water', 'deep', 'dirt', 'gravel', 'grass', 'moss', 'meadow', 'stone', 'brick', 'wood']; // bottom to top
+const LAYERS = ['bank', 'water', 'deep', 'dirt', 'soil', 'gravel', 'grass', 'moss', 'meadow', 'stone', 'brick', 'wood']; // bottom to top
 function addTileShape(path, x, y, rad, same, c, r) {
   const n = same(c, r - 1), e = same(c + 1, r), s2 = same(c, r + 1), w = same(c - 1, r);
   const o = 0.6; // tiny overlap so neighbours never show a hairline seam
@@ -2581,6 +2615,7 @@ function buildChunk(cx, cy, gmap = ground) {
     const dot = (path, dx, dy, rr2) => { path.moveTo(dx + rr2, dy); path.arc(dx, dy, rr2, 0, Math.PI * 2); };
     if (G.dots) for (let i = 0; i < (G.big ? 7 : 5); i++) dot(L(t, 'dots', G.dots[Math.floor(rnd() * G.dots.length)]).path, x + 5 + rnd() * (TILE - 10), y + 5 + rnd() * (TILE - 10), G.big ? 2.6 : 1.6);
     if (G.pave === 'stone') { const sp = L(t, 'lines', SHADE.stone).path; for (const [a, b] of [[2, 2], [TILE / 2 + 1, 2], [2, TILE / 2 + 1], [TILE / 2 + 1, TILE / 2 + 1]]) sp.rect(x + a, y + b, TILE / 2 - 3, TILE / 2 - 3); }
+    if (G.pave === 'furrow') { const sp = L(t, 'lines', SHADE.soil).path; for (let i = 1; i < 4; i++) { sp.moveTo(x, y + i * 10); sp.lineTo(x + TILE, y + i * 10); } }
     if (G.pave === 'brick') { const sp = L(t, 'lines', SHADE.brick).path; for (let i = 1; i < 4; i++) { sp.moveTo(x, y + i * 10); sp.lineTo(x + TILE, y + i * 10); } for (let i = 0; i < 4; i++) for (let bx = i % 2 ? 10 : 0; bx < TILE; bx += 20) { sp.moveTo(x + bx, y + i * 10); sp.lineTo(x + bx, y + i * 10 + 10); } }
     if (G.pave === 'wood') { const sp = L(t, 'lines', SHADE.wood).path; for (let i = 1; i < 5; i++) { sp.moveTo(x + i * 8, y); sp.lineTo(x + i * 8, y + TILE); } const nl = L(t, 'dots', '#5a3c20').path; for (let i = 0; i < 5; i++) { dot(nl, x + i * 8 + 4, y + 4, 0.9); dot(nl, x + i * 8 + 4, y + TILE - 4, 0.9); } }
   }
@@ -3339,16 +3374,11 @@ document.querySelectorAll('#tools button').forEach(b => b.addEventListener('clic
     b.innerHTML = foodType === 'berry' ? '🍓<span>Berry</span>' : '🥬<span>Feed</span>';
     return say(foodType === 'berry' ? 'Berries 🍓 sweet treats, but too many make a chubby turtle' : 'Lettuce 🥬 healthy everyday food', 2600);
   }
-  if (b.dataset.mode === 'farm' && mode === 'farm') { // tap Farm again: cycle seeds
-    const ks = Object.keys(CROPS); seedK = ks[(ks.indexOf(seedK) + 1) % ks.length];
-    b.innerHTML = `${CROPS[seedK].icon}<span>Farm</span>`;
-    return say(`${CROPS[seedK].name}: ${CROPS[seedK].h}h to grow · ⭐${CROPS[seedK].stars} a harvest`, 2600);
-  }
   endPaint();
   mode = b.dataset.mode;
   placing = null; endArrange();
   document.querySelectorAll('#tools button').forEach(x => x.classList.toggle('on', x === b));
-  say({ walk: turtles.length > 1 ? (isPicked() ? `Tap to call ${sel.name} · tap ${sel.name} again to deselect` : 'Tap a turtle to pick it') : 'Tap to call your turtle · tap him to pet', food: `Tap to drop ${foodType === 'berry' ? 'berries' : 'lettuce'} · tap Feed again to switch`, clean: 'Tap the messes to scoop them', play: 'Tap to toss the ball · flick it', farm: `Tap ground to plow (⭐${PLOW_COST}) · tap plot to plant ${CROPS[seedK].icon} or harvest · tap Farm again for seeds` }[mode]);
+  say({ walk: turtles.length > 1 ? (isPicked() ? `Tap to call ${sel.name} · tap ${sel.name} again to deselect` : 'Tap a turtle to pick it') : 'Tap to call your turtle · tap him to pet', food: `Tap to drop ${foodType === 'berry' ? 'berries' : 'lettuce'} · tap Feed again to switch`, clean: 'Tap the messes to scoop them', play: 'Tap to toss the ball · flick it' }[mode]);
   if (mode === 'play' && !ball) ball = makeBall(cam.x, cam.y);
   renderToybar();
 }));
@@ -3413,7 +3443,7 @@ cv.addEventListener('pointerdown', e => {
     gest = { kind: 'ball' };
     return;
   }
-  if (!visit && !placing && (tendAt(p) || hiveTap(p))) return;
+  if (!visit && !placing && (tendAt(p) || hiveTap(p) || farmTap(p))) return;
   gest = { kind: 'maybe', sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y }; // a tap, unless the finger moves (then it's a pan)
 });
 cv.addEventListener('pointermove', e => {
@@ -3532,7 +3562,6 @@ function tap(p) {
   if (hitT && mode === 'clean' && hitT.mud > 0) return wash(hitT);
   if (hitT && hitT === sel && picked && turtles.length > 1) return deselect(); // tap the picked turtle again to let go
   if (hitT) return pet(hitT);
-  if (mode === 'farm') return visit ? say("That's your friend's farm") : farmTap(p);
   if (mode === 'walk' && !isPicked()) say('Tap a turtle to pick it, then tap to call it');
   else if (mode === 'walk') { job('call'); wakeUp(sel); sel.userTarget = { x: p.x, y: p.y }; sel.eat = null; sel.drinkT = 0; sel.outing = null; }
   else if (mode === 'food') {
@@ -3764,6 +3793,8 @@ function buildShop() {
     : up.garden === 1 ? { icon: '🍓', name: 'Big garden', desc: 'Six plots, and strawberries too.', cost: 140, buy: () => { up.garden = 2; ensurePlots(); } }
       : up.garden === 2 ? { icon: '🍓', name: 'Huge garden', desc: 'Eight plots, half of them strawberries.', cost: 450, buy: () => { up.garden = 3; ensurePlots(); const g = objOf('garden'); if (g) keepInYard(g); } }
         : { icon: '🍓', name: 'Huge garden', desc: 'Lettuce and strawberries on tap.', done: 'Maxed' });
+  rows.push({ sec: '🌱 Farm' });
+  for (const [k, C] of Object.entries(CROPS)) rows.push({ icon: C.icon, name: `${C.name} seeds`, desc: `${C.pack} seeds. Plant on Plowed soil (🖌️ paint brush), ripe in ${C.h}h, ⭐${C.stars} a harvest. Turtles won't eat them.${farm().seeds[k] ? ` You have ${farm().seeds[k]}.` : ''}`, cost: C.cost, buy: () => buySeeds(k) });
   rows.push(farm().hives.length < MAX_HIVES
     ? { icon: '🐝', name: 'Beehive', desc: `Makes a jar of honey every 90 min (holds ${HONEY_MAX}). Tap it for ⭐${HONEY_STARS} a jar.`, cost: HIVE_COST, buy: () => { farm().hives.push({ x: clamp(cam.x + rand(-80, 80), 40, YW - 40), y: clamp(cam.y + rand(-60, 60), 50, YH - 40), t0: Date.now() }); } }
     : { icon: '🐝', name: 'Beehives', desc: 'A buzzing apiary.', done: 'Maxed' });
