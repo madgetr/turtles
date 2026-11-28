@@ -1811,9 +1811,9 @@ function drawGarden(o, now) {
 
 // ---------- farm: paint Plowed soil, plant seeds from the shop (turtles leave crops alone), harvest for stars; beehives make honey ----------
 const CROPS = {
-  wheat: { icon: '🌾', name: 'Wheat', h: 2, stars: 20, pack: 4, cost: 6 },
-  carrot: { icon: '🥕', name: 'Carrots', h: 3, stars: 40, pack: 4, cost: 10 },
-  pumpkin: { icon: '🎃', name: 'Pumpkins', h: 4, stars: 80, pack: 3, cost: 14 },
+  wheat: { icon: '🌾', name: 'Wheat', h: 2, stars: 8, pack: 4, cost: 6 },
+  carrot: { icon: '🥕', name: 'Carrots', h: 3, stars: 10, pack: 4, cost: 10 },
+  pumpkin: { icon: '🎃', name: 'Pumpkins', h: 4, stars: 15, pack: 3, cost: 14 },
 };
 const HIVE_COST = 60, MAX_HIVES = 3, HONEY_MS = 90 * 60000, HONEY_MAX = 3, HONEY_STARS = 40;
 let seedK = 'wheat';
