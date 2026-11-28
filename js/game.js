@@ -509,7 +509,7 @@ const illCare = s => s.hunger > 70 && s.thirst > 70 && s.happy > 55 && (s.clean 
 function illTick(t, dt, now) {
   const s = t.st;
   if (!s.illNext) s.illNext = now + rand(18, 36) * 3600e3; // existing/new turtles get a grace period first
-  if (!s.ill && now > s.illNext && Math.random() < dt / (30 * 3600) * (poops.length >= 3 || s.happy < 30 ? 2 : 1)) {
+  if (!s.ill && now > s.illNext && Math.random() < dt / (30 * 3600) * (nearPoops(t) >= 3 || s.happy < 30 ? 2 : 1)) {
     s.ill = now + rand(1.5, 3) * 3600e3; s.illNext = s.ill + rand(36, 72) * 3600e3; t.illNew = true;
   }
   if (!s.ill) return false;
@@ -1167,7 +1167,7 @@ function updateStats(dt) {
   if (T.mud > 0) { if (!misty) T.mud = Math.max(0, T.mud - dt / 900); /* mist keeps mud soft */ if (T.mud < 0.75) st.happy = clamp(st.happy - dt * 0.04, 0, 100); } // dried mud itches
   st.thirst = clamp(st.thirst - dt * 0.15 * (misty ? 0.5 : 1), 0, 100);
   soilStep(T, dt);
-  let drain = (0.05 + poops.length * 0.04) * lerp(0.8, 1.25, T.traits.playful); // playful ones get bored faster
+  let drain = (0.05 + nearPoops(T) * 0.04) * lerp(0.8, 1.25, T.traits.playful); // playful ones get bored faster
   if (st.hunger < 30) drain += 0.12;
   if (st.thirst < 30) drain += 0.12;
   if (st.social < MOOD.lonely) drain += 0.05;
@@ -1185,7 +1185,7 @@ function updateStats(dt) {
   if (st.health > 40) T.warned = false;
   if (st.health <= 0 && T.dying === undefined) { if (up.vet > 0) useVet(T, true); else die(T); }
   // healthy, happy turtles slowly grow on their own
-  if (st.hunger > 50 && st.thirst > 50 && st.happy > 50 && st.health > 50 && poops.length < 3) grow(dt * GROW_PER_SEC * (warm ? 1.15 : 1));
+  if (st.hunger > 50 && st.thirst > 50 && st.happy > 50 && st.health > 50 && nearPoops(T) < 3) grow(dt * GROW_PER_SEC * (warm ? 1.15 : 1));
   S = T.S = lerp(S, sizeFor(G()), Math.min(1, dt * 2)); // ease size changes
 }
 // Health change per second while you're watching. Neglect here can be fatal; while away it can't.
@@ -1232,6 +1232,7 @@ function grow(amount) {
     earn(10, T.x, T.y - S * 2);
   }
 }
+const nearPoops = (t, R = 260) => poops.reduce((n, q) => n + (Math.hypot(q.x - t.x, q.y - t.y) < R), 0);
 // Cleanliness decays over time: faster with nearby poop (falls off with distance), mud on the shell, and swimming in a mucky pond.
 function soilStep(t, dt) {
   let rate = 100 / (14 * 3600);
@@ -1390,6 +1391,18 @@ function hex(c, x, y, r, rot = 0) {
   c.closePath();
 }
 
+function drawStink(o, time, c = ctx) { // wavy green stench lines rising off yucky turtles
+  const k = 1 - (o.st.clean ?? 100) / 35, R = o.S;
+  c.save(); c.lineWidth = Math.max(1.5, R * 0.09); c.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    const ph = (time * 0.5 + i / 3) % 1, x0 = o.x + (i - 1) * R * 0.55, y0 = o.y - R * (0.6 + ph * 1.4);
+    c.strokeStyle = `rgba(120,160,60,${(0.25 + 0.6 * k) * Math.sin(ph * Math.PI)})`;
+    c.beginPath();
+    for (let j = 0; j <= 8; j++) { const t = j / 8; c[j ? 'lineTo' : 'moveTo'](x0 + Math.sin(t * 6 + time * 4 + i * 2) * R * 0.15, y0 - t * R * 0.8); }
+    c.stroke();
+  }
+  c.restore();
+}
 function drawTurtle(time, c = ctx) {
   const g = G(), L = look(g), wide = 1 + 0.25 * T.chub;
   const shiver = st.warm < MOOD.cold && !T.rest ? Math.sin(time * 55) * Math.max(0.6, S * 0.03) : 0; // cold: little shivers
@@ -1586,7 +1599,7 @@ function drawTurtle(time, c = ctx) {
   }
   // need bubble
   const crave = st.hunger < 85 && craving(T);
-  const need = st.health < SICK ? '🤒' : st.hunger < 30 ? '🥬' : st.thirst < 30 ? '💧' : poops.length >= 3 ? '🧹' : st.warm < MOOD.cold ? '🥶' : st.energy < MOOD.tired ? '💤'
+  const need = st.health < SICK ? '🤒' : st.hunger < 30 ? '🥬' : st.thirst < 30 ? '💧' : nearPoops(T) >= 3 ? '🧹' : st.warm < MOOD.cold ? '🥶' : st.energy < MOOD.tired ? '💤'
     : st.social < MOOD.lonely ? '🤗' : crave ? (crave === 'berry' ? '🍓' : '🥗') : st.happy < 25 ? '🎾' : T.mud > 0 && T.mud < 0.75 ? '🛁' : null;
   if (need && !T.wild && !T.eat && T.drinkT <= 0 && T.rest?.kind !== 'sleep') {
     const bx = T.x + S * 0.9 + 6, by = T.y - S * 1.5 - 8 + Math.sin(time * 3) * 3;
@@ -4633,6 +4646,7 @@ function frameBody(now) {
       ctx.globalAlpha = clamp(o.releasing ?? 1, 0, 1) * (o.swim ? 0.88 : 1);
       drawTurtle(time);
       ctx.globalAlpha = 1;
+      if ((o.st.clean ?? 100) < 35) drawStink(o, time);
       if (o.swim) { ctx.strokeStyle = '#ffffff55'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(o.x, o.y, o.S * 1.25, o.S * 1.05, o.a, 0, 7); ctx.stroke(); }
     }
   }
