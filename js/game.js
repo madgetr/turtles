@@ -1578,6 +1578,12 @@ function drawBowl(time) {
   if (bowl.level > 0.01) {
     const wr = (r - 9) * Math.sqrt(bowl.level);
     c.fillStyle = '#4aa3d8cc'; c.beginPath(); c.arc(x, y, wr, 0, 7); c.fill();
+    const al = BOWLS[up.bowl].refill ? up.algae || 0 : 0;
+    if (al > 0.05) { // algae: green tint plus scummy blobs
+      c.fillStyle = `rgba(92,140,40,${0.55 * al})`; c.beginPath(); c.arc(x, y, wr, 0, 7); c.fill();
+      c.fillStyle = `rgba(60,100,25,${0.7 * al})`;
+      for (let i = 0; i < 7; i++) { const a = i * 2.4, d = wr * (0.45 + 0.4 * ((i * 37) % 10) / 10); c.beginPath(); c.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, 3 + al * 4, 0, 7); c.fill(); }
+    }
     c.strokeStyle = '#ffffff66'; c.lineWidth = 2;
     c.beginPath(); c.arc(x, y, wr * (0.5 + 0.2 * Math.sin(time * 2)), -2.4, -1.2); c.stroke();
   }
@@ -1775,6 +1781,12 @@ function drawGarden(o, now) {
     for (let l = 0; l < 4; l++) { const a = l * Math.PI / 2 + 0.6; c.beginPath(); c.ellipse(sp.x + Math.cos(a) * 6 * sc, sp.y + Math.sin(a) * 6 * sc, 8 * sc, 4 * sc, a, 0, 7); c.fill(); }
     if (slotType(i) === 'berry' && k > 0.6) { c.fillStyle = '#fff'; c.beginPath(); c.arc(sp.x, sp.y, 2.5, 0, 7); c.fill(); }
   });
+  const nw = Math.floor((up.weeds || 0) * cols * 7); // weed tufts, fixed spots so they don't jitter
+  c.strokeStyle = '#4e7d2a'; c.lineWidth = 2;
+  for (let i = 0; i < nw; i++) {
+    const wx = o.x - w / 2 + 12 + ((i * 73) % 97) / 97 * (w - 24), wy = o.y - h / 2 + 12 + ((i * 41) % 89) / 89 * (h - 24);
+    c.beginPath(); for (const dx of [-4, 0, 4]) { c.moveTo(wx, wy + 4); c.lineTo(wx + dx, wy - 5 - (i % 3)); } c.stroke();
+  }
 }
 
 // ---------- day and night (follows the phone's clock) ----------
@@ -3152,6 +3164,11 @@ function drawFeeder(o, time) {
   c.fillStyle = '#d9f2c4'; c.beginPath(); c.roundRect(x - 11, y - 14, 22, 18, 4); c.fill(); // window
   c.fillStyle = '#5fae3e'; c.beginPath(); c.roundRect(x - 11, y - 14 + 18 * (0.3 + 0.1 * Math.sin(time)), 22, 18 * (0.7 - 0.1 * Math.sin(time)), 4); c.fill();
   if (up.feeder > 1) { c.fillStyle = '#e0343c'; c.beginPath(); c.arc(x + 5, y - 2, 3, 0, 7); c.arc(x - 4, y + 1, 2.5, 0, 7); c.fill(); }
+  if (up.jam) { // jammed: blinking warning badge
+    const b = 0.6 + 0.4 * Math.sin(time * 5);
+    c.globalAlpha = b; c.fillStyle = '#f2c230'; c.beginPath(); c.moveTo(x + 22, y - 44); c.lineTo(x + 36, y - 20); c.lineTo(x + 8, y - 20); c.closePath(); c.fill();
+    c.fillStyle = '#3a2a10'; c.fillRect(x + 20.5, y - 37, 3, 10); c.fillRect(x + 20.5, y - 25, 3, 3); c.globalAlpha = 1;
+  }
 }
 function feederFood(feeder, F) {
   const type = F.berries && Math.random() < 0.35 ? 'berry' : 'lettuce', bites = type === 'berry' ? 2 : 3;
