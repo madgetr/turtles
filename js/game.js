@@ -1811,11 +1811,11 @@ function drawGarden(o, now) {
 
 // ---------- farm: paint Plowed soil, plant seeds from the shop (turtles leave crops alone), harvest for stars; beehives make honey ----------
 const CROPS = {
-  wheat: { icon: '🌾', name: 'Wheat', h: 2, stars: 4, pack: 4, cost: 6 },
-  carrot: { icon: '🥕', name: 'Carrots', h: 3, stars: 6, pack: 4, cost: 10 },
-  pumpkin: { icon: '🎃', name: 'Pumpkins', h: 4, stars: 9, pack: 3, cost: 14 },
+  wheat: { icon: '🌾', name: 'Wheat', h: 2, stars: 20, pack: 4, cost: 6 },
+  carrot: { icon: '🥕', name: 'Carrots', h: 3, stars: 40, pack: 4, cost: 10 },
+  pumpkin: { icon: '🎃', name: 'Pumpkins', h: 4, stars: 80, pack: 3, cost: 14 },
 };
-const HIVE_COST = 60, MAX_HIVES = 3, HONEY_MS = 90 * 60000, HONEY_MAX = 3, HONEY_STARS = 4;
+const HIVE_COST = 60, MAX_HIVES = 3, HONEY_MS = 90 * 60000, HONEY_MAX = 3, HONEY_STARS = 40;
 let seedK = 'wheat';
 const farm = () => { const F = (up.farm = up.farm || {}); F.fields = F.fields || {}; F.hives = F.hives || []; F.seeds = F.seeds || {}; return F; };
 const cropK = f => clamp((Date.now() - f.t0) / (CROPS[f.crop].h * 3600000), 0, 1);
