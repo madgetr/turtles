@@ -1809,6 +1809,66 @@ function drawGarden(o, now) {
   }
 }
 
+// ---------- farm: plow tiles, plant crops (turtles leave them alone), harvest for stars; beehives make honey ----------
+const CROPS = { wheat: { icon: '🌾', name: 'Wheat', h: 2, stars: 4 }, carrot: { icon: '🥕', name: 'Carrots', h: 3, stars: 6 }, pumpkin: { icon: '🎃', name: 'Pumpkins', h: 4, stars: 9 } };
+const PLOW_COST = 2, MAX_FIELDS = 24, HIVE_COST = 60, MAX_HIVES = 3, HONEY_MS = 90 * 60000, HONEY_MAX = 3, HONEY_STARS = 4;
+let seedK = 'wheat';
+const farm = () => (up.farm = up.farm || { fields: {}, hives: [] });
+const cropK = f => f.crop ? clamp((Date.now() - f.t0) / (CROPS[f.crop].h * 3600000), 0, 1) : 0;
+const honeyOf = h => Math.min(HONEY_MAX, Math.floor((Date.now() - h.t0) / HONEY_MS));
+function farmTap(p) {
+  const F = farm(), c = Math.floor(p.x / TILE), r = Math.floor(p.y / TILE), k = `${c},${r}`, f = F.fields[k];
+  if (!f) {
+    if (ground[k] === 'water') return say('Can\'t plow water');
+    if (Object.keys(F.fields).length >= MAX_FIELDS) return say(`That's a full farm (${MAX_FIELDS} plots)`);
+    if (stars < PLOW_COST) return say(`Plowing costs ⭐${PLOW_COST}`);
+    stars -= PLOW_COST; F.fields[k] = { crop: null, t0: 0 }; snd.play('scoop'); buzz(10);
+    emit((c + 0.5) * TILE, (r + 0.5) * TILE, 'sparkle', 4); say(`Plowed! Tap it to plant ${CROPS[seedK].icon}`);
+  } else if (!f.crop) {
+    f.crop = seedK; f.t0 = Date.now(); snd.play('drop'); buzz(8); say(`${CROPS[seedK].icon} planted · ready in ${CROPS[seedK].h}h`);
+  } else if (cropK(f) >= 1) {
+    const C = CROPS[f.crop]; f.crop = null; earn(C.stars, (c + 0.5) * TILE, r * TILE); emit((c + 0.5) * TILE, (r + 0.5) * TILE, 'sparkle', 8); say(`${C.icon} Harvested!`);
+  } else {
+    const m = Math.ceil((1 - cropK(f)) * CROPS[f.crop].h * 60); say(`${CROPS[f.crop].icon} ${m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`} to go`);
+  }
+  save();
+}
+function hiveTap(p) {
+  const h = farm().hives.find(h => dist(h, p) < Math.max(28, 24 / cam.z));
+  if (!h) return false;
+  const n = honeyOf(h);
+  if (!n) { const m = Math.ceil((HONEY_MS - (Date.now() - h.t0)) / 60000); say(`🐝 Busy bees · honey in ${m}m`); return true; }
+  h.t0 = Date.now(); earn(n * HONEY_STARS, h.x, h.y - 30); say(`🍯 ${n} jar${n > 1 ? 's' : ''} of honey!`); save();
+  return true;
+}
+function drawFarm(v, time) {
+  const F = up.farm; if (!F) return;
+  const c = ctx; c.textAlign = 'center'; c.textBaseline = 'middle';
+  for (const k in F.fields) {
+    const [cc, rr] = k.split(',').map(Number), x = cc * TILE, y = rr * TILE, f = F.fields[k];
+    if (!inView({ x: x + TILE / 2, y: y + TILE / 2 }, TILE, v)) continue;
+    c.fillStyle = '#6b4626'; c.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
+    c.strokeStyle = '#4f321a'; c.lineWidth = 2;
+    for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(x + 4, y + i * TILE / 4); c.lineTo(x + TILE - 4, y + i * TILE / 4); c.stroke(); }
+    if (!f.crop) continue;
+    const kk = cropK(f);
+    if (kk < 0.35) { c.fillStyle = '#7cc45a'; c.beginPath(); c.ellipse(x + TILE / 2 - 3, y + TILE / 2, 4, 2, -0.6, 0, 7); c.ellipse(x + TILE / 2 + 3, y + TILE / 2, 4, 2, 0.6, 0, 7); c.fill(); continue; }
+    const bob = kk >= 1 ? Math.sin(time * 4 + cc) * 1.5 : 0;
+    c.font = `${Math.round(12 + kk * 14)}px sans-serif`; c.globalAlpha = kk >= 1 ? 1 : 0.85;
+    c.fillText(CROPS[f.crop].icon, x + TILE / 2, y + TILE / 2 + bob); c.globalAlpha = 1;
+    if (kk >= 1) { c.font = '10px sans-serif'; c.fillText('✨', x + TILE - 7, y + 7); }
+  }
+  for (const h of F.hives) {
+    if (!inView(h, 40, v)) continue;
+    c.fillStyle = '#0003'; c.beginPath(); c.ellipse(h.x, h.y + 14, 16, 5, 0, 0, 7); c.fill();
+    c.fillStyle = '#e0a83a'; c.strokeStyle = '#9a6a1c'; c.lineWidth = 2;
+    for (let i = 0; i < 4; i++) { const w = 26 - Math.abs(i - 1.2) * 5; c.beginPath(); c.roundRect(h.x - w / 2, h.y + 8 - i * 9, w, 9, 4); c.fill(); c.stroke(); }
+    c.fillStyle = '#3a2410'; c.beginPath(); c.arc(h.x, h.y + 4, 3, 0, 7); c.fill();
+    for (let i = 0; i < 3; i++) { const a = time * 2 + i * 2.1; c.font = '9px sans-serif'; c.fillText('🐝', h.x + Math.cos(a) * 20, h.y - 14 + Math.sin(a * 1.3) * 8); }
+    const n = honeyOf(h); if (n) { c.font = '14px sans-serif'; c.fillText('🍯'.repeat(n), h.x, h.y - 32); }
+  }
+}
+
 // ---------- day and night (follows the phone's clock) ----------
 function hourNow() { if (hourOverride !== null) return hourOverride; const d = new Date(); return d.getHours() + d.getMinutes() / 60; }
 function darkness() {
@@ -3279,11 +3339,16 @@ document.querySelectorAll('#tools button').forEach(b => b.addEventListener('clic
     b.innerHTML = foodType === 'berry' ? '🍓<span>Berry</span>' : '🥬<span>Feed</span>';
     return say(foodType === 'berry' ? 'Berries 🍓 sweet treats, but too many make a chubby turtle' : 'Lettuce 🥬 healthy everyday food', 2600);
   }
+  if (b.dataset.mode === 'farm' && mode === 'farm') { // tap Farm again: cycle seeds
+    const ks = Object.keys(CROPS); seedK = ks[(ks.indexOf(seedK) + 1) % ks.length];
+    b.innerHTML = `${CROPS[seedK].icon}<span>Farm</span>`;
+    return say(`${CROPS[seedK].name}: ${CROPS[seedK].h}h to grow · ⭐${CROPS[seedK].stars} a harvest`, 2600);
+  }
   endPaint();
   mode = b.dataset.mode;
   placing = null; endArrange();
   document.querySelectorAll('#tools button').forEach(x => x.classList.toggle('on', x === b));
-  say({ walk: turtles.length > 1 ? (isPicked() ? `Tap to call ${sel.name} · tap ${sel.name} again to deselect` : 'Tap a turtle to pick it') : 'Tap to call your turtle · tap him to pet', food: `Tap to drop ${foodType === 'berry' ? 'berries' : 'lettuce'} · tap Feed again to switch`, clean: 'Tap the messes to scoop them', play: 'Tap to toss the ball · flick it' }[mode]);
+  say({ walk: turtles.length > 1 ? (isPicked() ? `Tap to call ${sel.name} · tap ${sel.name} again to deselect` : 'Tap a turtle to pick it') : 'Tap to call your turtle · tap him to pet', food: `Tap to drop ${foodType === 'berry' ? 'berries' : 'lettuce'} · tap Feed again to switch`, clean: 'Tap the messes to scoop them', play: 'Tap to toss the ball · flick it', farm: `Tap ground to plow (⭐${PLOW_COST}) · tap plot to plant ${CROPS[seedK].icon} or harvest · tap Farm again for seeds` }[mode]);
   if (mode === 'play' && !ball) ball = makeBall(cam.x, cam.y);
   renderToybar();
 }));
@@ -3348,7 +3413,7 @@ cv.addEventListener('pointerdown', e => {
     gest = { kind: 'ball' };
     return;
   }
-  if (!visit && !placing && tendAt(p)) return;
+  if (!visit && !placing && (tendAt(p) || hiveTap(p))) return;
   gest = { kind: 'maybe', sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y }; // a tap, unless the finger moves (then it's a pan)
 });
 cv.addEventListener('pointermove', e => {
@@ -3467,6 +3532,7 @@ function tap(p) {
   if (hitT && mode === 'clean' && hitT.mud > 0) return wash(hitT);
   if (hitT && hitT === sel && picked && turtles.length > 1) return deselect(); // tap the picked turtle again to let go
   if (hitT) return pet(hitT);
+  if (mode === 'farm') return visit ? say("That's your friend's farm") : farmTap(p);
   if (mode === 'walk' && !isPicked()) say('Tap a turtle to pick it, then tap to call it');
   else if (mode === 'walk') { job('call'); wakeUp(sel); sel.userTarget = { x: p.x, y: p.y }; sel.eat = null; sel.drinkT = 0; sel.outing = null; }
   else if (mode === 'food') {
@@ -3698,6 +3764,9 @@ function buildShop() {
     : up.garden === 1 ? { icon: '🍓', name: 'Big garden', desc: 'Six plots, and strawberries too.', cost: 140, buy: () => { up.garden = 2; ensurePlots(); } }
       : up.garden === 2 ? { icon: '🍓', name: 'Huge garden', desc: 'Eight plots, half of them strawberries.', cost: 450, buy: () => { up.garden = 3; ensurePlots(); const g = objOf('garden'); if (g) keepInYard(g); } }
         : { icon: '🍓', name: 'Huge garden', desc: 'Lettuce and strawberries on tap.', done: 'Maxed' });
+  rows.push(farm().hives.length < MAX_HIVES
+    ? { icon: '🐝', name: 'Beehive', desc: `Makes a jar of honey every 90 min (holds ${HONEY_MAX}). Tap it for ⭐${HONEY_STARS} a jar.`, cost: HIVE_COST, buy: () => { farm().hives.push({ x: clamp(cam.x + rand(-80, 80), 40, YW - 40), y: clamp(cam.y + rand(-60, 60), 50, YH - 40), t0: Date.now() }); } }
+    : { icon: '🐝', name: 'Beehives', desc: 'A buzzing apiary.', done: 'Maxed' });
   rows.push(up.crab === 0 ? { icon: '🦀', name: 'Clean-up crab', desc: 'Scuttles around scooping up poop, even while you\'re away.', cost: 90, buy: () => { up.crab = 1; syncCrabs(); } }
     : up.crab < 4 ? { icon: '🦀', name: ['', 'Second crab', 'Third crab', 'Fourth crab'][up.crab], desc: 'More tidying for more turtles.', cost: [0, 160, 320, 600][up.crab], buy: () => { up.crab++; syncCrabs(); } }
       : { icon: '🦀', name: 'Crab crew', desc: 'Four crabs on poop patrol.', done: 'Maxed' });
@@ -4497,6 +4566,7 @@ function frameBody(now) {
   drawGroundLife(v);
   if (slide && inView(slide, SLIDE.len, v)) drawSlide(slide);
   if (garden && inView(garden, 100, v)) drawGarden(garden, nowMs);
+  drawFarm(v, time);
   for (const o of objs) if (o.kind === 'deco' && !DECOS[o.type].tall && !DECOS[o.type].canopy && inView(o, 40, v)) drawDeco(o, time, dk);
   for (const p of poops) if (inView(p, 30, v)) drawPoop(p, time);
   for (const f of foods) if (inView(f, 30, v)) drawFoodItem(f);
