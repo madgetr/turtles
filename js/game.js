@@ -20,7 +20,7 @@ const buzz = ms => navigator.vibrate && navigator.vibrate(ms);
 
 // ---------- world state ----------
 const bowl = { x: 0, y: 0, r: 38, level: 1, fill: 0 };
-let foods = [], poops = [], parts = [], ball = null, marker = null;
+let foods = [], poops = [], parts = [], ball = null, balls = [], marker = null; // ball = the selected toy; balls = every toy out in the yard
 let mode = 'walk', foodType = 'lettuce';
 
 // ---------- yard, camera, upgrades ----------
@@ -763,8 +763,9 @@ function goalFor() {
     }
     if (bowl.level > 0.08) return { p: bowl, reach: bowl.r + 4, bodyReach: bowl.r + S * 0.9 + 6, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = bowl; actStar(); } }; // bumping the rim is close enough
   }
-  if (ball && st.hunger > 15 && st.thirst > 15 && (T.traits.playful > 0.3 || st.happy < 40)) { // lazy turtles only play when they're down
-    return { p: ball, reach: 14 + ball.r, by: 'mouth', arrive: nudgeBall, keepGoing: true };
+  const bl = balls.length ? balls.reduce((a, b) => dist(T, a) < dist(T, b) ? a : b) : null;
+  if (bl && st.hunger > 15 && st.thirst > 15 && (T.traits.playful > 0.3 || st.happy < 40)) { // lazy turtles only play when they're down
+    return { p: bl, reach: 14 + bl.r, by: 'mouth', arrive: () => withBall(bl, nudgeBall), keepGoing: true };
   }
   if (T.outing) {
     const o = T.outing;
@@ -1053,6 +1054,11 @@ function updateFeet(dt) {
 // ---------- ball physics ----------
 const BALL_TIME = 15; // seconds a ball sticks around after you last touched it
 function updateBall(dt) {
+  for (const b of [...balls]) if (withBall(b, () => { stepBall(dt); return !ball; })) balls.splice(balls.indexOf(b), 1);
+  if (!balls.includes(ball)) ball = balls.find(b => b.toy === up.toy) || null;
+}
+function withBall(b, fn) { const s = ball; ball = b; const v = fn(); ball = s; return v; }
+function stepBall(dt) {
   if (!ball) return;
   ball.idle = (ball.idle || 0) + (ball.held ? 0 : dt);
   if (ball.idle > BALL_TIME) { emit(ball.x, ball.y, 'sparkle', 6); ball = null; return; }
@@ -1086,7 +1092,8 @@ function updateBall(dt) {
     }
   }
 }
-const makeBall = (x, y) => ({ x, y, vx: 0, vy: 0, r: TOYS[up.toy].r, spin: 0, idle: 0, toy: up.toy });
+const makeBall = (x, y) => { balls = balls.filter(b => b.toy !== up.toy); const b = mkBall(x, y); balls.push(b); return b; };
+const mkBall = (x, y) => ({ x, y, vx: 0, vy: 0, r: TOYS[up.toy].r, spin: 0, idle: 0, toy: up.toy });
 
 // ---------- stats ----------
 // Where to sleep: hut, cave, moss bed, or under the tree on a sunny day. Returns a route, or null = right here.
@@ -2737,7 +2744,7 @@ const yardCost = () => YARD_COSTS[yards.length - 1];
 function resetYardRuntime() { // things that only make sense in the yard you were just in
   endArrange();
   endPaint();
-  ball = null; crabs = []; bugs = []; frogs = []; birds = []; ladybugs = []; flies = []; parts = [];
+  ball = null; balls = []; crabs = []; bugs = []; frogs = []; birds = []; ladybugs = []; flies = []; parts = [];
   placing = null; marker = null; camFollow = null; feederT = 0;
 }
 function switchYard(j) {
@@ -3415,7 +3422,7 @@ toybar.addEventListener('click', e => {
   const k = e.target.closest('button')?.dataset.toy;
   if (!k) return;
   up.toy = k;
-  ball = makeBall(ball ? ball.x : cam.x, ball ? ball.y : cam.y);
+  ball = balls.find(b => b.toy === k) || makeBall(cam.x + rand(-40, 40), cam.y + rand(-40, 40)); // tap a toy to add it; the others stay out
   renderToybar(); say(TOYS[k].name);
 });
 
@@ -3459,7 +3466,9 @@ cv.addEventListener('pointerdown', e => {
     const o = movables().filter(o => dist(p, o) < hitR(o) + 10 / cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0];
     if (o) { gest = { kind: 'move', o, dx: o.x - p.x, dy: o.y - p.y, sx: e.clientX, sy: e.clientY, moved: false }; return; }
   }
-  if (!visit && mode === 'play' && ball && !placing && dist(p, ball) < ball.r + 22 / cam.z) {
+  const hit = mode === 'play' && balls.find(b => dist(p, b) < b.r + 22 / cam.z);
+  if (!visit && hit && !placing) {
+    if (hit !== ball) { ball = hit; up.toy = hit.toy; renderToybar(); }
     drag = { hist: [{ x: p.x, y: p.y, t: performance.now() }] }; ball.held = true; ball.idle = 0; ball.vx = ball.vy = 0;
     gest = { kind: 'ball' };
     return;
@@ -3829,7 +3838,7 @@ function buildShop() {
   rows.push({ sec: '🎾 Toys' });
   for (const [k, toy] of Object.entries(TOYS)) {
     rows.push(up.toys.includes(k) ? { icon: toy.icon, name: toy.name, desc: toy.desc, done: 'Owned' }
-      : { icon: toy.icon, name: toy.name, desc: toy.desc, cost: toy.cost, buy: () => { up.toys.push(k); up.toy = k; if (ball) ball = makeBall(ball.x, ball.y); renderToybar(); say('Pick toys in Play mode 🎾', 2500); } });
+      : { icon: toy.icon, name: toy.name, desc: toy.desc, cost: toy.cost, buy: () => { up.toys.push(k); up.toy = k; if (ball) ball = makeBall(ball.x + 30, ball.y); renderToybar(); say('Pick toys in Play mode 🎾', 2500); } });
   }
   rows.push({ sec: '🪨 Rocks' });
   for (const [k, rd] of Object.entries(ROCKS)) {
@@ -4627,10 +4636,10 @@ function frameBody(now) {
   if (inView(bowl, bowl.r + 10, v)) drawBowl(time); // low to the ground: turtles always walk over it
   drawMarker(time);
   // turtles, crabs, toy, bowl, feeder, mirror and tall decorations back-to-front so overlaps look right
-  const order = [...turtles.filter(t => !t.off), ...(feeder ? [feeder] : []), ...(ball ? [ball] : []), ...(mirror ? [mirror] : []),
+  const order = [...turtles.filter(t => !t.off), ...(feeder ? [feeder] : []), ...balls, ...(mirror ? [mirror] : []),
     ...crabs.filter(c => inView(c, 20, v)), ...objs.filter(o => (WILD[o.kind] || (o.kind === 'deco' && DECOS[o.type].tall)) && inView(o, 60, v))].sort((a, b) => a.y - b.y);
   for (const o of order) {
-    if (o === ball) drawBall();
+    if (balls.includes(o)) withBall(o, drawBall);
     else if (o === feeder) drawFeeder(o, time);
     else if (o === mirror) drawMirror(o, time);
     else if (o.crab) drawCrab(o);
