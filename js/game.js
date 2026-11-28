@@ -3793,17 +3793,17 @@ function buildShop() {
     : up.garden === 1 ? { icon: '🍓', name: 'Big garden', desc: 'Six plots, and strawberries too.', cost: 140, buy: () => { up.garden = 2; ensurePlots(); } }
       : up.garden === 2 ? { icon: '🍓', name: 'Huge garden', desc: 'Eight plots, half of them strawberries.', cost: 450, buy: () => { up.garden = 3; ensurePlots(); const g = objOf('garden'); if (g) keepInYard(g); } }
         : { icon: '🍓', name: 'Huge garden', desc: 'Lettuce and strawberries on tap.', done: 'Maxed' });
-  rows.push({ sec: '🌱 Farm' });
-  for (const [k, C] of Object.entries(CROPS)) rows.push({ icon: C.icon, name: `${C.name} seeds`, desc: `${C.pack} seeds. Plant on Plowed soil (🖌️ paint brush), ripe in ${C.h}h, ⭐${C.stars} a harvest. Turtles won't eat them.${farm().seeds[k] ? ` You have ${farm().seeds[k]}.` : ''}`, cost: C.cost, buy: () => buySeeds(k) });
-  rows.push(farm().hives.length < MAX_HIVES
-    ? { icon: '🐝', name: 'Beehive', desc: `Makes a jar of honey every 90 min (holds ${HONEY_MAX}). Tap it for ⭐${HONEY_STARS} a jar.`, cost: HIVE_COST, buy: () => { farm().hives.push({ x: clamp(cam.x + rand(-80, 80), 40, YW - 40), y: clamp(cam.y + rand(-60, 60), 50, YH - 40), t0: Date.now() }); } }
-    : { icon: '🐝', name: 'Beehives', desc: 'A buzzing apiary.', done: 'Maxed' });
   rows.push(up.crab === 0 ? { icon: '🦀', name: 'Clean-up crab', desc: 'Scuttles around scooping up poop, even while you\'re away.', cost: 90, buy: () => { up.crab = 1; syncCrabs(); } }
     : up.crab < 4 ? { icon: '🦀', name: ['', 'Second crab', 'Third crab', 'Fourth crab'][up.crab], desc: 'More tidying for more turtles.', cost: [0, 160, 320, 600][up.crab], buy: () => { up.crab++; syncCrabs(); } }
       : { icon: '🦀', name: 'Crab crew', desc: 'Four crabs on poop patrol.', done: 'Maxed' });
   rows.push(objOf('lamp') ? sizeRow('lamp', AUTO.lamp)
     : { icon: AUTO.lamp.icon, name: AUTO.lamp.name, desc: AUTO.lamp.desc, cost: AUTO.lamp.cost, buy: () => startPlacing(newObj('lamp')) });
   rows.push({ icon: '💊', name: 'Vet kit', desc: `Cures sickness instantly, and saves a turtle that's about to die. You have ${up.vet}.`, cost: 40, buy: () => { up.vet++; say('Vet kits are used from a turtle\'s menu (tap its name)', 3000); } });
+  rows.push({ sec: '🌱 Farm' });
+  for (const [k, C] of Object.entries(CROPS)) rows.push({ icon: C.icon, name: `${C.name} seeds`, desc: `${C.pack} seeds. Plant on Plowed soil (🖌️ paint brush), ripe in ${C.h}h, ⭐${C.stars} a harvest. Turtles won't eat them.${farm().seeds[k] ? ` You have ${farm().seeds[k]}.` : ''}`, cost: C.cost, buy: () => buySeeds(k) });
+  rows.push(farm().hives.length < MAX_HIVES
+    ? { icon: '🐝', name: 'Beehive', desc: `Makes a jar of honey every 90 min (holds ${HONEY_MAX}). Tap it for ⭐${HONEY_STARS} a jar.`, cost: HIVE_COST, buy: () => { farm().hives.push({ x: clamp(cam.x + rand(-80, 80), 40, YW - 40), y: clamp(cam.y + rand(-60, 60), 50, YH - 40), t0: Date.now() }); } }
+    : { icon: '🐝', name: 'Beehives', desc: 'A buzzing apiary.', done: 'Maxed' });
   rows.push({ sec: '🎾 Toys' });
   for (const [k, toy] of Object.entries(TOYS)) {
     rows.push(up.toys.includes(k) ? { icon: toy.icon, name: toy.name, desc: toy.desc, done: 'Owned' }
