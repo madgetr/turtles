@@ -503,15 +503,30 @@ const AWAY = { // tuned for a ~7-8 h school day (fine, just hungry/thirsty), whi
   hunger: 100 / (12 * 3600), thirst: 100 / (9 * 3600), happy: 100 / (16 * 3600), dirty: 100 / (36 * 3600),
   hurt: 100 / (12 * 3600), filth: 100 / (22 * 3600), heal: 100 / (10 * 3600), // full recovery takes ~10 h away
 };
-function healthStep(t, dt, r) {
+// Random illness: rare (~every few days, 36-72 h cooldown), lasts ~1.5-3 h. Cured by a vet kit;
+// great care (fed, watered, happy, clean, warm) halves the time and stops the extra health drain.
+const illCare = s => s.hunger > 70 && s.thirst > 70 && s.happy > 55 && poops.length < 2 && !(s.warm < MOOD.cold);
+function illTick(t, dt, now) {
   const s = t.st;
+  if (!s.illNext) s.illNext = now + rand(18, 36) * 3600e3; // existing/new turtles get a grace period first
+  if (!s.ill && now > s.illNext && Math.random() < dt / (30 * 3600) * (poops.length >= 3 || s.happy < 30 ? 2 : 1)) {
+    s.ill = now + rand(1.5, 3) * 3600e3; s.illNext = s.ill + rand(36, 72) * 3600e3; t.illNew = true;
+  }
+  if (!s.ill) return false;
+  if (illCare(s)) s.ill -= dt * 1000; // well looked after: recovers twice as fast
+  if (now >= s.ill) { s.ill = 0; t.illOver = true; return false; }
+  return true;
+}
+function healthStep(t, dt, r, now = Date.now()) {
+  const s = t.st, ill = illTick(t, dt, now);
   let d = 0;
   if (s.hunger <= 0) d -= r.hurt;
   if (s.thirst <= 0) d -= r.hurt;
   if (poops.length >= 3) d -= r.filth;
   if (s.happy <= 10) d -= r.filth;
   if (d === 0 && s.hunger > 40 && s.thirst > 40 && poops.length < 3) d = r.heal;
-  s.health = clamp(s.health + d * dt, 0, 100);
+  if (ill) { if (d > 0) d = 0; if (!illCare(s)) d -= r.hurt * 0.15; } // no healing while ill; neglect makes it worse
+  s.health = clamp(s.health + d * dt, 0, ill ? Math.min(100, SICK - 1) : 100);
 }
 function daytimeFactor(ms) {
   const d = new Date(ms);
@@ -641,7 +656,9 @@ function simulateAway(secs) {
       s.energy = clamp(s.energy - dt * (activeDay ? 0.025 : -0.01), 0, 100);
       t.chub = clamp(t.chub - dt * 0.000018, 0, 1);
 
-      healthStep(t, dt, AWAY);
+      if (r.ill0 === undefined) r.ill0 = !!s.ill;
+      healthStep(t, dt, AWAY, simNow);
+      if (s.ill) r.gotIll = true;
       s.health = Math.max(s.health, AWAY_FLOOR);
 
       if (s.health > 65 && s.hunger > 50 && s.thirst > 50) {
@@ -687,6 +704,7 @@ function showAway(report, where) {
     if (r.ate) bits.push(`ate ${r.ate} leftover snack${r.ate > 1 ? 's' : ''}`);
     if (r.drank) bits.push(r.pond ? 'swam and drank in the pond' : 'drank from the bowl');
     if (r.pooped) bits.push(`pooped ${r.pooped}×`);
+    if (r.gotIll && !r.ill0) bits.push(s.ill ? 'caught a bug 🤒' : 'caught a bug but got over it');
     const stage = stageOf(t.growth);
     if (stage !== r.stage0) bits.push(`grew into ${aStage(stage)}! 🎉`);
     const now = [];
@@ -1157,6 +1175,8 @@ function updateStats(dt) {
   if (T.chub > 0.75) drain += 0.02;
   st.happy = clamp(st.happy - dt * drain, 0, 100);
   healthStep(T, dt, graceT > 0 ? GRACE : LIVE);
+  if (T.illNew) { T.illNew = false; say(`🤒 ${T.name} caught a bug! Use a vet kit, or keep them fed, watered, happy & clean to help them recover.`, 4500); snd.play('sick'); }
+  if (T.illOver) { T.illOver = false; say(`${T.name} is feeling better! 🐢`, 3000); emit(T.x, T.y - T.S, 'heart', 3); }
   if (isIdle()) st.health = Math.max(st.health, AWAY_FLOOR); // nobody's playing: like being away, sick at worst
   if (st.health < 25 && !T.warned && T.dying === undefined) {
     T.warned = true; say(`⚠️ ${T.name} is very sick! Food & water, quick!`); buzz([60, 80, 60]); snd.play('sick');
@@ -1194,7 +1214,7 @@ function die(t) {
 
 const nearLamp = t => { const l = objOf('lamp'); return !!l && dist(t, l) < LAMP_R * 0.8; };
 function useVet(t, auto) {
-  up.vet--; t.st.health = 100; t.st.hunger = Math.max(t.st.hunger, 40); t.st.thirst = Math.max(t.st.thirst, 40); t.warned = false;
+  up.vet--; t.st.ill = 0; t.st.health = 100; t.st.hunger = Math.max(t.st.hunger, 40); t.st.thirst = Math.max(t.st.thirst, 40); t.warned = false;
   emit(t.x, t.y, 'sparkle', 12); emit(t.x, t.y - t.S, 'heart', 3); buzz([30, 50, 30]);
   say(auto ? `💊 A vet kit saved ${t.name}!` : `${t.name} feels much better 💊`, 3000);
   save();
@@ -3487,6 +3507,7 @@ function pet(t) {
   const f = t.traits.friendly;
   t.petT = lerp(1.9, 0.9, f); t.petCool = 1.2; t.v *= 0.2; // grumpy turtles hide in their shell longer
   job('pet', t.name);
+  if (t.st.ill) t.st.ill -= 3 * 60e3; // comfort helps: each pat shaves ~3 min off an illness
   if (f < 0.35 && Math.random() < 0.6) { // not in the mood
     t.st.happy = clamp(t.st.happy + 1, 0, 100); t.st.social = clamp(t.st.social + 5, 0, 100);
     setTimeout(() => { emit(t.x, t.y - t.S, 'grr'); sfx('hiss', t); }, t.petT * 500);
