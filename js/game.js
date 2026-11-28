@@ -151,7 +151,9 @@ let YW = 400, YH = 600;
 const cam = { x: 200, y: 300, z: 1 };
 let placing = null; // object waiting for a tap to be put down
 const objOf = kind => objs.find(o => o.kind === kind);
-const inPond = p => { const o = objOf('pond'); return (!!o && ((p.x - o.x) / POND.rx) ** 2 + ((p.y - o.y) / POND.ry) ** 2 < 1) || inWater(p); }; // painted water counts as pond
+function wld(o, dx, dy) { const a = o.rot || 0, c = Math.cos(a), s = Math.sin(a); return { x: o.x + dx * c - dy * s, y: o.y + dx * s + dy * c }; } // local offset -> world, honouring rotation
+function loc(o, p) { const a = -(o.rot || 0), c = Math.cos(a), s = Math.sin(a), dx = p.x - o.x, dy = p.y - o.y; return { x: dx * c - dy * s, y: dx * s + dy * c }; } // world -> local offset
+const inPond = p => { const o = objOf('pond'), q = o && loc(o, p); return (!!o && (q.x / POND.rx) ** 2 + (q.y / POND.ry) ** 2 < 1) || inWater(p); }; // painted water counts as pond
 const structCount = () => objs.filter(o => STRUCTS[o.kind] || ROCKS[o.kind]).length;
 
 // Growth: 0 = fresh hatchling, 1 = full-grown. Size (half shell length) scales with it.
@@ -413,7 +415,7 @@ function packYard() {
     poops, level: bowl.level,
     foods: foods.map(({ x, y, type, bites, max, rot, fromFeeder, slot, t }) => ({ x, y, type, bites, max, rot, fromFeeder, slot, t })),
     up: Object.fromEntries(Object.entries(up).filter(([k]) => !SHARED_UP.includes(k))),
-    objs: objs.map(({ kind, type, seed, x, y }) => ({ kind, type, seed, x, y })), plots, ground,
+    objs: objs.map(({ kind, type, seed, x, y, rot }) => ({ kind, type, seed, x, y, rot })), plots, ground,
     bowlPos: { x: bowl.x, y: bowl.y }, cam: { x: cam.x, y: cam.y, z: cam.z },
   };
 }
@@ -757,8 +759,8 @@ function goalFor() {
     if (w && (bowl.level <= 0.08 || dist(T, w) < dist(T, bowl)) && (!pond || dist(T, w) < dist(T, pond) - POND.rx)) // painted water is closest
       return { p: w, reach: TILE * 0.5 + 4, bodyReach: TILE * 0.5 + S * 0.9 + 6, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = 'water'; actStar(); } }; // reaching the edge is enough
     if (pond && (bowl.level <= 0.08 || dist(T, pond) - POND.rx < dist(T, bowl))) { // drink at the near edge of the pond
-      const a = Math.atan2(T.y - pond.y, T.x - pond.x);
-      const p = { x: pond.x + Math.cos(a) * POND.rx * 0.8, y: pond.y + Math.sin(a) * POND.ry * 0.8 };
+      const a = Math.atan2(T.y - pond.y, T.x - pond.x) - (pond.rot || 0);
+      const p = wld(pond, Math.cos(a) * POND.rx * 0.8, Math.sin(a) * POND.ry * 0.8);
       return { p, reach: 12, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = pond; actStar(); } };
     }
     if (bowl.level > 0.08) return { p: bowl, reach: bowl.r + 4, bodyReach: bowl.r + S * 0.9 + 6, by: 'mouth', arrive: () => { T.drinkT = 2.6; T.drinkFrom = bowl; actStar(); } }; // bumping the rim is close enough
@@ -785,7 +787,7 @@ function goalFor() {
         const f = o.friend;
         if (f && dist(f, T) < (f.S + S) * 1.8) { actStar(); st.social = clamp(st.social + 12, 0, 100); f.st.social = clamp(f.st.social + 6, 0, 100); emit(T.x, T.y - S, 'heart', 2); T.a = Math.atan2(f.y - T.y, f.x - T.x); }
       }
-      if (o.then === 'slide') { const sl = objOf('slide'); if (sl) T.sliding = { t: 0, from: { x: T.x, y: sl.y }, to: { x: sl.x - SLIDE.len / 2 - 55, y: sl.y } }; }
+      if (o.then === 'slide') { const sl = objOf('slide'); if (sl) T.sliding = { t: 0, from: { x: T.x, y: T.y }, to: wld(sl, -SLIDE.len / 2 - 55, 0) }; }
     } };
   }
   return null;
@@ -814,15 +816,15 @@ function pickOuting() {
     const pt = () => { const a = rand(0, 7), d = rand(30, FOG_R * 0.8); return { x: clamp(fog.x + Math.cos(a) * d, 40, YW - 40), y: clamp(fog.y + Math.sin(a) * d * 0.7, 30, YH - 20) }; };
     return { route: [pt(), pt(), pt()], then: 'mist' };
   }]);
-  if (cave) opts.push([0.05 + (1 - tr.friendly) * 0.7 + (st.happy < 40 ? 0.3 : 0), () => ({ route: [{ x: cave.x, y: cave.y + CAVE.r + 28 }, { x: cave.x + rand(-12, 12), y: cave.y + rand(-8, 8) }], then: 'hide' })]);
+  if (cave) opts.push([0.05 + (1 - tr.friendly) * 0.7 + (st.happy < 40 ? 0.3 : 0), () => ({ route: [wld(cave, 0, CAVE.r + 28), wld(cave, rand(-12, 12), rand(-8, 8))], then: 'hide' })]);
   if (log) opts.push([0.1 + tr.curious * 0.45, () => {
-    const e = [{ x: log.x - LOG.len / 2 - 40, y: log.y }, { x: log.x + LOG.len / 2 + 40, y: log.y }];
+    const e = [wld(log, -LOG.len / 2 - 40, 0), wld(log, LOG.len / 2 + 40, 0)];
     if (dist(T, e[1]) < dist(T, e[0])) e.reverse();
     return { route: e, then: 'tunnel' };
   }]);
-  if (hut) opts.push([0.05 + (1 - tr.friendly) * 0.4 + (st.happy < 40 ? 0.3 : 0) + (st.warm < 60 ? 1.5 : 0), () => ({ route: [{ x: hut.x, y: hut.y + HUT.r + 30 }, { x: hut.x, y: hut.y }], then: 'hide' })]);
+  if (hut) opts.push([0.05 + (1 - tr.friendly) * 0.4 + (st.happy < 40 ? 0.3 : 0) + (st.warm < 60 ? 1.5 : 0), () => ({ route: [wld(hut, 0, HUT.r + 30), { x: hut.x, y: hut.y }], then: 'hide' })]);
   if (pond) {
-    const spot = () => ({ x: pond.x + rand(-0.55, 0.55) * POND.rx, y: pond.y + rand(-0.45, 0.45) * POND.ry });
+    const spot = () => wld(pond, rand(-0.55, 0.55) * POND.rx, rand(-0.45, 0.45) * POND.ry);
     opts.push([0.1 + tr.playful * 0.4, () => ({ route: [spot(), spot(), spot()], then: 'swim' })]);
   }
   if (waterTiles.length >= 4) { // a swim in your own painted water
@@ -832,12 +834,12 @@ function pickOuting() {
   }
   const lamp = objOf('lamp'), mud = objOf('mud'), slide = objOf('slide'), mirror = objOf('mirror');
   if (lamp) opts.push([0.15 + (darkness() > 0.5 ? 0.35 : 0) + (st.warm < 60 ? 3 : 0), () => ({ route: [{ x: lamp.x + rand(-50, 50), y: lamp.y + rand(-40, 40) }], then: 'bask' })]);
-  if (mud) opts.push([0.05 + tr.playful * 0.3 + tr.curious * 0.1, () => ({ route: [{ x: mud.x + rand(-0.4, 0.4) * MUD.rx, y: mud.y + rand(-0.3, 0.3) * MUD.ry }], then: 'roll' })]);
+  if (mud) opts.push([0.05 + tr.playful * 0.3 + tr.curious * 0.1, () => ({ route: [wld(mud, rand(-0.4, 0.4) * MUD.rx, rand(-0.3, 0.3) * MUD.ry)], then: 'roll' })]);
   if (slide) opts.push([0.08 + tr.playful * 0.35 + tr.speed * 0.1, () => {
-    const lo = slide.x - SLIDE.len / 2, hi = slide.x + SLIDE.len / 2;
-    return { route: [{ x: lo - 30, y: slide.y }, { x: lo + 4, y: slide.y }, { x: hi - 10, y: slide.y }], then: 'slide' };
+    const h = SLIDE.len / 2;
+    return { route: [wld(slide, -h - 30, 0), wld(slide, -h + 4, 0), wld(slide, h - 10, 0)], then: 'slide' };
   }]);
-  if (mirror) opts.push([0.05 + tr.curious * 0.35, () => ({ route: [{ x: mirror.x, y: mirror.y + 50 }], then: 'mirror' })]);
+  if (mirror) opts.push([0.05 + tr.curious * 0.35, () => ({ route: [wld(mirror, 0, 50)], then: 'mirror' })]);
   const others = turtles.filter(o => o !== T && o.releasing === undefined && !o.dying);
   if (others.length) opts.push([st.social < 40 ? 4 : 0.1 + tr.friendly * 0.3, () => { // go see a friend
     const f = others.reduce((b, o) => (dist(o, T) < dist(b, T) ? o : b)), d = Math.max(1, dist(f, T)), gap = (f.S + S) * 1.1;
@@ -1099,9 +1101,9 @@ const mkBall = (x, y) => ({ x, y, vx: 0, vy: 0, r: TOYS[up.toy].r, spin: 0, idle
 // Where to sleep: hut, cave, moss bed, or under the tree on a sunny day. Returns a route, or null = right here.
 function bedSpot() {
   const hut = objOf('hut'), cave = objOf('cave'), bed = objOf('mossbed'), tr = trees(), day = darkness() < 0.3, opts = [];
-  if (hut) opts.push([1, () => [{ x: hut.x, y: hut.y + HUT.r + 30 }, { x: hut.x + rand(-15, 15), y: hut.y + rand(-10, 10) }]]);
-  if (cave) opts.push([0.4 + (1 - T.traits.friendly), () => [{ x: cave.x, y: cave.y + CAVE.r + 28 }, { x: cave.x + rand(-12, 12), y: cave.y + rand(-8, 8) }]]);
-  if (bed) opts.push([1.6, () => [{ x: bed.x + rand(-0.55, 0.55) * BED.rx, y: bed.y + rand(-0.5, 0.5) * BED.ry }]]);
+  if (hut) opts.push([1, () => [wld(hut, 0, HUT.r + 30), wld(hut, rand(-15, 15), rand(-10, 10))]]);
+  if (cave) opts.push([0.4 + (1 - T.traits.friendly), () => [wld(cave, 0, CAVE.r + 28), wld(cave, rand(-12, 12), rand(-8, 8))]]);
+  if (bed) opts.push([1.6, () => [wld(bed, rand(-0.55, 0.55) * BED.rx, rand(-0.5, 0.5) * BED.ry)]]);
   if (tr.length && day) opts.push([2, () => { // nearest tree's shade
     const tree = tr.reduce((b, o) => (dist(o, T) < dist(b, T) ? o : b)), L = treeLook(tree), a = rand(0, 7), d = rand(20, L.R * 0.6);
     return [{ x: clamp(tree.x + L.lean + Math.cos(a) * d, 40, YW - 40), y: clamp(tree.y - 10 + Math.sin(a) * d * 0.6, 30, YH - 20) }];
@@ -1112,11 +1114,11 @@ function bedSpot() {
   return opts[0][1]();
 }
 const near = (kind, t, rr) => { const o = objOf(kind); return !!o && dist(t, o) < rr; };
-const onBed = t => { const b = objOf('mossbed'); return !!b && ((t.x - b.x) / BED.rx) ** 2 + ((t.y - b.y) / BED.ry) ** 2 < 1; };
+const onBed = t => { const b = objOf('mossbed'), q = b && loc(b, t); return !!b && (q.x / BED.rx) ** 2 + (q.y / BED.ry) ** 2 < 1; };
 const inShade = t => trees().some(o => { const L = treeLook(o); return ((t.x - o.x - L.lean) / L.R) ** 2 + ((t.y - o.y + 10) / (L.R * 0.72)) ** 2 < 1; });
 function onLookout(t) { // 0 = on the ground, 1 = up on the plateau
   const o = objOf('lookout'); if (!o) return 0;
-  const { rx, ry } = rockDims(o), e = ((t.x - o.x) / (rx * 0.8)) ** 2 + ((t.y - o.y + ry * 0.12) / (ry * 0.72)) ** 2;
+  const { rx, ry } = rockDims(o), q = loc(o, t), e = (q.x / (rx * 0.8)) ** 2 + ((q.y + ry * 0.12) / (ry * 0.72)) ** 2;
   return clamp((1 - e) * 4, 0, 1);
 }
 
@@ -1792,9 +1794,9 @@ function drawCrab(c) {
 
 // ---------- veggie garden ----------
 const gardenCols = () => [2, 2, 3, 4][up.garden] || 2;
-function slotPos(i) {
+function slotPos(i, flat) { // flat: unrotated, for drawing inside the already-turned garden
   const g = objOf('garden'), cols = gardenCols();
-  return { x: g.x + ((i % cols) - (cols - 1) / 2) * SLOT, y: g.y + (Math.floor(i / cols) - 0.5) * SLOT };
+  return (flat ? (o, x, y) => ({ x: o.x + x, y: o.y + y }) : wld)(g, ((i % cols) - (cols - 1) / 2) * SLOT, (Math.floor(i / cols) - 0.5) * SLOT);
 }
 const slotType = i => (up.garden > 2 ? (i % 2 === 1 ? 'berry' : 'lettuce') : up.garden > 1 && i % 3 === 1 ? 'berry' : 'lettuce');
 function ensurePlots() {
@@ -1824,7 +1826,7 @@ function drawGarden(o, now) {
   for (let r = 0; r < 6; r++) { const y = o.y - h / 2 + 12 + r * (h - 24) / 5; c.beginPath(); c.moveTo(o.x - w / 2 + 10, y); c.lineTo(o.x + w / 2 - 10, y); c.stroke(); }
   plots.forEach((pl, i) => {
     if (foods.some(f => f.slot === i)) return; // ripe: the food itself is drawn
-    const sp = slotPos(i), k = clamp((now - pl.t0) / GROW_MS[slotType(i)], 0, 1), sc = 0.25 + k * 0.6;
+    const sp = slotPos(i, true), k = clamp((now - pl.t0) / GROW_MS[slotType(i)], 0, 1), sc = 0.25 + k * 0.6;
     c.fillStyle = '#6fbf4a';
     for (let l = 0; l < 4; l++) { const a = l * Math.PI / 2 + 0.6; c.beginPath(); c.ellipse(sp.x + Math.cos(a) * 6 * sc, sp.y + Math.sin(a) * 6 * sc, 8 * sc, 4 * sc, a, 0, 7); c.fill(); }
     if (slotType(i) === 'berry' && k > 0.6) { c.fillStyle = '#fff'; c.beginPath(); c.arc(sp.x, sp.y, 2.5, 0, 7); c.fill(); }
@@ -2152,7 +2154,7 @@ function updateLife(dt, dk) {
   }
   // frogs sit at the pond edge, hop away from turtles, croak at night
   const wantF = pond ? 1 + up.lily * 2 : 0;
-  while (frogs.length < wantF) { const a = rand(0, 7); frogs.push({ a, x: pond.x + Math.cos(a) * POND.rx * 1.05, y: pond.y + Math.sin(a) * POND.ry * 1.05, hop: 0, from: null, to: null, croak: rand(2, 8), face: a }); }
+  while (frogs.length < wantF) { const a = rand(0, 7); frogs.push({ a, ...wld(pond, Math.cos(a) * POND.rx * 1.05, Math.sin(a) * POND.ry * 1.05), hop: 0, from: null, to: null, croak: rand(2, 8), face: a }); }
   if (frogs.length > wantF) frogs.length = wantF;
   for (const f of frogs) {
     if (f.hop > 0) {
@@ -2164,7 +2166,7 @@ function updateLife(dt, dk) {
     const scared = turtles.some(t => dist(t, f) < t.S + 40);
     if (scared || Math.random() < dt * 0.05) { // hop somewhere else round the pond
       f.a += rand(0.6, 1.6) * (Math.random() < 0.5 ? -1 : 1);
-      f.from = { x: f.x, y: f.y }; f.to = { x: pond.x + Math.cos(f.a) * POND.rx * 1.05, y: pond.y + Math.sin(f.a) * POND.ry * 1.05 };
+      f.from = { x: f.x, y: f.y }; f.to = wld(pond, Math.cos(f.a) * POND.rx * 1.05, Math.sin(f.a) * POND.ry * 1.05);
       f.face = Math.atan2(f.to.y - f.y, f.to.x - f.x); f.hop = 1;
     }
     if (dk > 0.5 && (f.croak -= dt) <= 0) { f.croak = rand(4, 12); emit(f.x, f.y - 8, 'note'); if (snd.soundMode() === 2) sfx('croak', f); }
@@ -3123,9 +3125,9 @@ function drawSlide(o) {
 }
 // how high up the slide a turtle is (0 = ground, 1 = top), for drawing it bigger
 function slideLift(t, sl) {
-  const lo = sl.x - SLIDE.len / 2;
-  if (Math.abs(t.y - sl.y) > SLIDE.w / 2 + 6 || t.x < lo || t.x > sl.x + SLIDE.len / 2 + 20) return 0;
-  return clamp((t.x - lo) / SLIDE.len, 0, 1);
+  const q = loc(sl, t), h = SLIDE.len / 2;
+  if (Math.abs(q.y) > SLIDE.w / 2 + 6 || q.x < -h || q.x > h + 20) return 0;
+  return clamp((q.x + h) / SLIDE.len, 0, 1);
 }
 function drawMirror(o, time) {
   const c = ctx, { x, y } = o;
@@ -3245,7 +3247,7 @@ function drawRock(o, time = 0, dk = 0) {
 function insideOf(o) {
   if (o.kind === 'hut') return turtles.some(t => dist(t, o) < HUT.r);
   if (o.kind === 'cave') return turtles.some(t => dist(t, o) < CAVE.r);
-  return turtles.some(t => Math.abs(t.x - o.x) < LOG.len / 2 && Math.abs(t.y - o.y) < LOG.r);
+  return turtles.some(t => { const q = loc(o, t); return Math.abs(q.x) < LOG.len / 2 && Math.abs(q.y) < LOG.r; });
 }
 const roofFade = (o, dt) => (o.fade = lerp(o.fade ?? 1, insideOf(o) ? 0.3 : 1, Math.min(1, dt * 5)));
 function drawLog(o, layer, a = 1) {
@@ -3463,8 +3465,9 @@ cv.addEventListener('pointerdown', e => {
   const p = s2w(e.clientX, e.clientY);
   if (painting) { gest = { kind: 'paint' }; lastPaint = p; paintBroke = false; paintAt(p); return; }
   if (arranging) { // grab the nearest movable thing under the finger
+    if (canSpin(lastGrab) && dist(p, knob(lastGrab)) < 22 / cam.z + 8) { gest = { kind: 'spin', o: lastGrab }; return; }
     const o = movables().filter(o => dist(p, o) < hitR(o) + 10 / cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0];
-    if (o) { gest = { kind: 'move', o, dx: o.x - p.x, dy: o.y - p.y, sx: e.clientX, sy: e.clientY, moved: false }; return; }
+    if (o) { lastGrab = o; gest = { kind: 'move', o, dx: o.x - p.x, dy: o.y - p.y, sx: e.clientX, sy: e.clientY, moved: false }; return; }
   }
   const hit = mode === 'play' && balls.find(b => dist(p, b) < b.r + 22 / cam.z);
   if (!visit && hit && !placing) {
@@ -3484,6 +3487,9 @@ cv.addEventListener('pointermove', e => {
     const p = s2w(e.clientX, e.clientY), d = dist(p, lastPaint), n = Math.ceil(d / (TILE * 0.4));
     for (let i = 1; i <= n; i++) paintAt({ x: lastPaint.x + (p.x - lastPaint.x) * i / n, y: lastPaint.y + (p.y - lastPaint.y) * i / n });
     lastPaint = p;
+  } else if (gest.kind === 'spin') {
+    const p = s2w(e.clientX, e.clientY), o = gest.o;
+    o.rot = Math.atan2(p.y - o.y, p.x - o.x);
   } else if (gest.kind === 'move') {
     const p = s2w(e.clientX, e.clientY);
     if (Math.hypot(e.clientX - gest.sx, e.clientY - gest.sy) > 6) gest.moved = true;
@@ -3553,12 +3559,25 @@ const nameOf = o => o === bowl ? BOWLS[up.bowl].name : o.kind === 'feeder' ? FEE
 const HIT = { pond: 100, log: 75, hut: HUT.r, garden: 55, mud: 60, slide: 75, mirror: 32, lamp: 30, feeder: 30, deco: 24, mossbed: 70, fog: 30, cave: 120, birdfeeder: 28, bughotel: 28 };
 const hitR = o => (o === bowl ? bowl.r : ROCKS[o.kind] ? rockDims(o).rx * 0.85 : o.kind === 'garden' ? gardenCols() * SLOT / 2 + 10 : (HIT[o.kind] || 30) * sizeK(o.kind));
 const movables = () => [bowl, ...objs, ...(up.farm?.hives || [])]; // beehives can be dragged too
-const doneBtn = document.getElementById('arrange-done');
-function startArrange() {
-  arranging = true; placing = null; shop.hidden = true; doneBtn.hidden = false;
-  say('Drag things to move them · tap a decoration to remove it', 4500);
+const doneBtn = document.getElementById('arrange-done'), rotBtn = document.getElementById('arrange-rot');
+let lastGrab = null; // the thing the ⟳ button turns
+const canSpin = o => o && objs.includes(o) && !(o.kind === 'deco' && DECOS[o.type].canopy);
+const knob = o => wld(o, hitR(o) + 26, 0); // drag this handle to turn freely
+function spun(o, f) { // draw o turned by its saved rotation
+  if (!o.rot) return f();
+  ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.rot); ctx.translate(-o.x, -o.y); f(); ctx.restore();
 }
-function endArrange() { if (!arranging) return; arranging = false; doneBtn.hidden = true; save(); }
+function spinGrab() {
+  if (!canSpin(lastGrab)) return say('Drag something first, then drag its ◯ handle (or tap ⟳) to turn it', 2500);
+  lastGrab.rot = ((lastGrab.rot || 0) + Math.PI / 4) % (Math.PI * 2); emit(lastGrab.x, lastGrab.y, 'sparkle', 4); buzz(8);
+}
+rotBtn.onclick = spinGrab;
+addEventListener('keydown', e => { if (arranging && (e.key === 'r' || e.key === 'R')) spinGrab(); });
+function startArrange() {
+  arranging = true; placing = null; shop.hidden = true; doneBtn.hidden = rotBtn.hidden = false; lastGrab = null;
+  say('Drag things to move them · drag the ◯ handle (or ⟳ / R) to turn them · tap a decoration to remove it', 4500);
+}
+function endArrange() { if (!arranging) return; arranging = false; doneBtn.hidden = rotBtn.hidden = true; save(); }
 doneBtn.onclick = endArrange;
 function wash(t) {
   if (t.mud > 0) job('wash');
@@ -4614,22 +4633,22 @@ function frameBody(now) {
   drawYard(v);
   const pond = objOf('pond'), mud = objOf('mud'), slide = objOf('slide'), lamp = objOf('lamp'), garden = objOf('garden'), mirror = objOf('mirror');
   if (lamp && inView(lamp, LAMP_R, v)) drawLampGlow(lamp, dk);
-  if (pond && inView(pond, POND.rx + 20, v)) { drawPond(pond, time); if (up.lily) drawLilies(pond, time); }
-  if (mud && inView(mud, MUD.rx + 10, v)) drawMud(mud, time);
-  for (const rk of rocksPlaced()) if (inView(rk, rockDims(rk).rx + 30, v)) drawRock(rk, time, dk);
+  if (pond && inView(pond, POND.rx + 20, v)) { spun(pond, () => { drawPond(pond, time); if (up.lily) drawLilies(pond, time); }); }
+  if (mud && inView(mud, MUD.rx + 10, v)) spun(mud, () => drawMud(mud, time));
+  for (const rk of rocksPlaced()) if (inView(rk, rockDims(rk).rx + 30, v)) spun(rk, () => drawRock(rk, time, dk));
   const bed = objOf('mossbed'), fog = objOf('fog'), cave = objOf('cave'), trs = trees();
   for (const o of trs) if (inView(o, treeLook(o).R + 30, v)) drawTrunk(o);
-  if (bed && inView(bed, BED.rx + 10, v)) drawMossBed(bed);
+  if (bed && inView(bed, BED.rx + 10, v)) spun(bed, () => drawMossBed(bed));
   const log = objOf('log'), hut = objOf('hut'); // floors now, roofs after the turtles
-  if (log && inView(log, LOG.len, v)) drawLog(log, 'floor');
-  if (hut && inView(hut, HUT.r + 10, v)) drawHut(hut, 'floor');
-  if (cave && inView(cave, CAVE.r * 1.2, v)) drawCave(cave, 'floor');
-  if (fog && inView(fog, 30, v)) drawFogMachine(fog, time);
+  if (log && inView(log, LOG.len, v)) spun(log, () => drawLog(log, 'floor'));
+  if (hut && inView(hut, HUT.r + 10, v)) spun(hut, () => drawHut(hut, 'floor'));
+  if (cave && inView(cave, CAVE.r * 1.2, v)) spun(cave, () => drawCave(cave, 'floor'));
+  if (fog && inView(fog, 30, v)) spun(fog, () => drawFogMachine(fog, time));
   drawGroundLife(v);
-  if (slide && inView(slide, SLIDE.len, v)) drawSlide(slide);
-  if (garden && inView(garden, 100, v)) drawGarden(garden, nowMs);
+  if (slide && inView(slide, SLIDE.len, v)) spun(slide, () => drawSlide(slide));
+  if (garden && inView(garden, 100, v)) spun(garden, () => drawGarden(garden, nowMs));
   drawFarm(v, time);
-  for (const o of objs) if (o.kind === 'deco' && !DECOS[o.type].tall && !DECOS[o.type].canopy && inView(o, 40, v)) drawDeco(o, time, dk);
+  for (const o of objs) if (o.kind === 'deco' && !DECOS[o.type].tall && !DECOS[o.type].canopy && inView(o, 40, v)) spun(o, () => drawDeco(o, time, dk));
   for (const p of poops) if (inView(p, 30, v)) drawPoop(p, time);
   for (const f of foods) if (inView(f, 30, v)) drawFoodItem(f);
   if (!visit) drawLoot(time, v); // your finds aren't in your friend's yard
@@ -4640,12 +4659,12 @@ function frameBody(now) {
     ...crabs.filter(c => inView(c, 20, v)), ...objs.filter(o => (WILD[o.kind] || (o.kind === 'deco' && DECOS[o.type].tall)) && inView(o, 60, v))].sort((a, b) => a.y - b.y);
   for (const o of order) {
     if (balls.includes(o)) withBall(o, drawBall);
-    else if (o === feeder) drawFeeder(o, time);
-    else if (o === mirror) drawMirror(o, time);
+    else if (o === feeder) spun(o, () => drawFeeder(o, time));
+    else if (o === mirror) spun(o, () => drawMirror(o, time));
     else if (o.crab) drawCrab(o);
-    else if (o.kind === 'birdfeeder') drawBirdFeeder(o);
-    else if (o.kind === 'bughotel') drawBugHotel(o);
-    else if (o.kind === 'deco') drawDeco(o, time, dk);
+    else if (o.kind === 'birdfeeder') spun(o, () => drawBirdFeeder(o));
+    else if (o.kind === 'bughotel') spun(o, () => drawBugHotel(o));
+    else if (o.kind === 'deco') spun(o, () => drawDeco(o, time, dk));
     else {
       use(o);
       const lift = slide ? slideLift(o, slide) : 0, up2 = onLookout(o);
@@ -4660,9 +4679,9 @@ function frameBody(now) {
     }
   }
   // tunnels, roofs and the lamp cover what's under them
-  if (log) { const a = roofFade(log, dt); if (inView(log, LOG.len, v)) drawLog(log, 'roof', a); }
-  if (hut) { const a = roofFade(hut, dt); if (inView(hut, HUT.r + 10, v)) drawHut(hut, 'roof', a); }
-  if (cave) { const a = roofFade(cave, dt); if (inView(cave, CAVE.r * 1.2, v)) drawCave(cave, 'roof', a); }
+  if (log) { const a = roofFade(log, dt); if (inView(log, LOG.len, v)) spun(log, () => drawLog(log, 'roof', a)); }
+  if (hut) { const a = roofFade(hut, dt); if (inView(hut, HUT.r + 10, v)) spun(hut, () => drawHut(hut, 'roof', a)); }
+  if (cave) { const a = roofFade(cave, dt); if (inView(cave, CAVE.r * 1.2, v)) spun(cave, () => drawCave(cave, 'roof', a)); }
   if (fog && inView(fog, FOG_R + 40, v)) drawMist(fog, time, dk);
   for (const o of trs) if (inView(o, treeLook(o).R + 40, v)) drawTree(o, time);
   drawAirLife(v);
@@ -4670,6 +4689,7 @@ function frameBody(now) {
   ctx.setLineDash([8 / cam.z, 6 / cam.z]); ctx.lineDashOffset = -time * 20; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5 / cam.z;
   if (placing) { ctx.beginPath(); ctx.arc(placing.x, placing.y, 70, 0, 7); ctx.stroke(); }
   if (arranging) for (const o of movables()) { ctx.beginPath(); ctx.arc(o.x, o.y, hitR(o) + 6, 0, 7); ctx.stroke(); }
+  if (arranging && canSpin(lastGrab)) { const k = knob(lastGrab); ctx.beginPath(); ctx.moveTo(lastGrab.x, lastGrab.y); ctx.lineTo(k.x, k.y); ctx.stroke(); ctx.beginPath(); ctx.arc(k.x, k.y, 12 / cam.z + 4, 0, 7); ctx.stroke(); }
   ctx.setLineDash([]);
   drawNight(dk);
   drawFlies(dk);

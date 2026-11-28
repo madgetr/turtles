@@ -770,6 +770,13 @@
       box-shadow: 0 4px 14px #0006;
     }
 
+    #arrange-rot {
+      position: fixed; left: calc(50% + 120px); bottom: calc(env(safe-area-inset-bottom) + 96px);
+      border: 0; border-radius: 16px; padding: 10px 14px; background: #5d8a3a; color: #fff;
+      font-size: 16px; font-weight: 700; box-shadow: 0 4px 14px #0006;
+    }
+
+    #arrange-rot[hidden],
     #arrange-done[hidden] {
       display: none;
     }
@@ -1632,6 +1639,7 @@ body.visiting #paintbar {
         class="brush">Brush</button><button class="done">✓ Done</button></div>
   </div>
   <button id="arrange-done" hidden>✓ Done arranging</button>
+  <button id="arrange-rot" hidden title="Rotate (R)">⟳</button>
   <div id="wild" hidden>
     <canvas id="wild-c"></canvas>
     <div id="wild-top"><button id="wild-close">← Home</button><span id="wild-nets"></span></div>
