@@ -243,7 +243,7 @@ function makeTurtle(o = {}) {
   if (!t.morph) t.morph = {}; // rare colours/features (only new hatchlings roll them: see rollMorph)
   if (!t.born) t.born = Date.now() - (t.growth || 0) * GROW_DAYS * 86400e3; // hatch time; older saves: guessed from how grown it is
   if (!t.tint) t.tint = o.hue ? { shell: clamp(o.hue * 0.5, -28, 28), skin: clamp(o.hue * 0.3, -18, 18), light: rand(-0.12, 0.12) } : randomTint();
-  t.st = { hunger: 80, thirst: 80, happy: 70, health: 100, social: 80, energy: 85, warm: 90, ...(o.st || {}) }; // last three are hidden moods
+  t.st = { hunger: 80, thirst: 80, happy: 70, clean: 100, health: 100, social: 80, energy: 85, warm: 90, ...(o.st || {}) }; // last three are hidden moods
   t.chub = o.chub || 0; t.diet = o.diet || []; // chub: 0 = trim, 1 = very round; diet = last few foods eaten
   t.traits = { ...randomTraits(), ...(o.traits || {}) };
   t.S = sizeFor(t.growth);
@@ -505,7 +505,7 @@ const AWAY = { // tuned for a ~7-8 h school day (fine, just hungry/thirsty), whi
 };
 // Random illness: rare (~every few days, 36-72 h cooldown), lasts ~1.5-3 h. Cured by a vet kit;
 // great care (fed, watered, happy, clean, warm) halves the time and stops the extra health drain.
-const illCare = s => s.hunger > 70 && s.thirst > 70 && s.happy > 55 && poops.length < 2 && !(s.warm < MOOD.cold);
+const illCare = s => s.hunger > 70 && s.thirst > 70 && s.happy > 55 && (s.clean ?? 100) > 50 && !(s.warm < MOOD.cold);
 function illTick(t, dt, now) {
   const s = t.st;
   if (!s.illNext) s.illNext = now + rand(18, 36) * 3600e3; // existing/new turtles get a grace period first
@@ -522,9 +522,9 @@ function healthStep(t, dt, r, now = Date.now()) {
   let d = 0;
   if (s.hunger <= 0) d -= r.hurt;
   if (s.thirst <= 0) d -= r.hurt;
-  if (poops.length >= 3) d -= r.filth;
+  if ((s.clean ?? 100) < 25) d -= r.filth;
   if (s.happy <= 10) d -= r.filth;
-  if (d === 0 && s.hunger > 40 && s.thirst > 40 && poops.length < 3) d = r.heal;
+  if (d === 0 && s.hunger > 40 && s.thirst > 40 && (s.clean ?? 100) >= 25) d = r.heal;
   if (ill) { if (d > 0) d = 0; if (!illCare(s)) d -= r.hurt * 0.15; } // no healing while ill; neglect makes it worse
   s.health = clamp(s.health + d * dt, 0, ill ? Math.min(100, SICK - 1) : 100);
 }
@@ -688,7 +688,7 @@ function simulateAway(secs) {
     }
   }
 
-  turtles.forEach(t => t.mud = Math.max(0, (t.mud || 0) - secs / 1200));
+  turtles.forEach(t => { soilStep(t, secs * 0.4); t.mud = Math.max(0, (t.mud || 0) - secs / 1200); });
   const chilly = darkness() > 0.5 && !lamp && !['hut', 'cave', 'heatrock', 'mossbed'].some(objOf);
   turtles.forEach(t => t.st.warm = chilly ? Math.min(t.st.warm, 35) : 100);
   turtles.forEach(t => t.S = sizeFor(t.growth));
@@ -1166,6 +1166,7 @@ function updateStats(dt) {
   if (warm) st.happy = clamp(st.happy + dt * 0.15, 0, 100);
   if (T.mud > 0) { if (!misty) T.mud = Math.max(0, T.mud - dt / 900); /* mist keeps mud soft */ if (T.mud < 0.75) st.happy = clamp(st.happy - dt * 0.04, 0, 100); } // dried mud itches
   st.thirst = clamp(st.thirst - dt * 0.15 * (misty ? 0.5 : 1), 0, 100);
+  soilStep(T, dt);
   let drain = (0.05 + poops.length * 0.04) * lerp(0.8, 1.25, T.traits.playful); // playful ones get bored faster
   if (st.hunger < 30) drain += 0.12;
   if (st.thirst < 30) drain += 0.12;
@@ -1231,7 +1232,14 @@ function grow(amount) {
     earn(10, T.x, T.y - S * 2);
   }
 }
-const cleanness = () => clamp(100 - poops.length * 20, 0, 100);
+// Cleanliness decays over time: faster with nearby poop (falls off with distance), mud on the shell, and swimming in a mucky pond.
+function soilStep(t, dt) {
+  let rate = 100 / (14 * 3600);
+  for (const q of poops) { const f = 1 - Math.hypot(q.x - t.x, q.y - t.y) / 260; if (f > 0) rate += 0.02 * f * f; }
+  rate += (t.mud || 0) * 0.015;
+  if (t.swim) rate += (up.algae || 0) * 0.04;
+  t.st.clean = clamp((t.st.clean ?? 100) - rate * dt, 0, 100);
+}
 
 const bars = ['health', 'hunger', 'thirst', 'clean', 'happy'].map(k => [k, document.getElementById('b-' + k)]);
 const stageEl = document.getElementById('stage');
@@ -1242,7 +1250,7 @@ function drawHud() {
   if (isPicked()) stageEl.textContent = `${st.health < SICK ? '🤒' : '🐢'} ${T.name} · ` + (T.growth >= 1 ? 'Adult' : `${stageOf(T.growth)} · ${Math.floor(T.growth * 100)}%`) + (st.health < SICK ? ' · sick' : '') + '  ⋯';
   else stageEl.textContent = `🐢 ${live.length} turtles` + (live.some(t => t.st.health < SICK) ? ' · 🤒 someone is sick' : '');
   for (const [k, el] of bars) { // nobody picked: the bars show the yard average
-    const v = k === 'clean' ? cleanness() : isPicked() ? st[k] : live.reduce((a, t) => a + t.st[k], 0) / Math.max(1, live.length);
+    const v = isPicked() ? st[k] : live.reduce((a, t) => a + t.st[k], 0) / Math.max(1, live.length);
     el.style.width = v + '%';
     el.style.background = v < 25 ? '#ef6a5a' : v < 50 ? '#f2c14e' : '#8fd16a';
   }
@@ -2427,7 +2435,7 @@ const POWER_RECHARGE = 3 * 3600e3;
 const POWERS = {
   beach: { icon: '🧹', name: 'Tidy Tide', desc: 'Scoops every poop, washes muddy turtles and fills the water.', run() {
     const n = poops.length; poops.forEach(q => emit(q.x, q.y, 'sparkle', 4)); poops = [];
-    for (const t of turtles) if (t.mud > 0) { t.mud = 0; emit(t.x, t.y, 'drop', 6); }
+    for (const t of turtles) { t.st.clean = 100; if (t.mud > 0) { t.mud = 0; emit(t.x, t.y, 'drop', 6); } }
     bowl.level = 1; bowl.fill = 1;
     if (n) job('scoop', null, n);
     return n ? `Sparkling clean! ${n} mess${n > 1 ? 'es' : ''} gone` : 'Everything sparkles!';
@@ -3531,7 +3539,8 @@ function startArrange() {
 function endArrange() { if (!arranging) return; arranging = false; doneBtn.hidden = true; save(); }
 doneBtn.onclick = endArrange;
 function wash(t) {
-  t.mud = 0; buzz(12); job('wash');
+  if (t.mud > 0) job('wash');
+  t.mud = 0; t.st.clean = 100; buzz(12);
   for (let i = 0; i < 12; i++) emit(t.x, t.y, 'drop');
   emit(t.x, t.y, 'sparkle', 6); earn(10, t.x, t.y - t.S * 2);
   t.st.happy = clamp(t.st.happy + 4, 0, 100);
@@ -3559,7 +3568,7 @@ function tap(p) {
   if (pc) return openParcel(pc);
   if (p.x < 0 || p.y < 0 || p.x > YW || p.y > YH) { if (isPicked() && turtles.length > 1) deselect(); return; }
   const hitT = turtles.filter(t => t.releasing === undefined && dist(p, t) < t.S * 1.2 + 8 / cam.z).sort((a, b) => dist(p, a) - dist(p, b))[0];
-  if (hitT && mode === 'clean' && hitT.mud > 0) return wash(hitT);
+  if (hitT && mode === 'clean' && (hitT.mud > 0 || hitT.st.clean < 90)) return wash(hitT);
   if (hitT && hitT === sel && picked && turtles.length > 1) return deselect(); // tap the picked turtle again to let go
   if (hitT) return pet(hitT);
   if (mode === 'walk' && !isPicked()) say('Tap a turtle to pick it, then tap to call it');
